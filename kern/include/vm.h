@@ -58,5 +58,7 @@ void free_kpages(vaddr_t addr);
 /* TLB shootdown handling called from interprocessor_interrupt */
 void vm_tlbshootdown(const struct tlbshootdown *);
 
+struct frametable_entry *frametable; // extern ??
+
 
 #endif /* _VM_H_ */
