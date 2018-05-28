@@ -6,9 +6,10 @@
 #include <vm.h>
 #include <machine/tlb.h>
 
-#define FT_ENTRY_SIZE 4
 /* Place your page table functions here */
 
+struct frametable_entry *firstfreeframe = 0;
+struct pagetable_entry *pagetable = 0;
 
 void vm_bootstrap(void)
 {
@@ -16,12 +17,46 @@ void vm_bootstrap(void)
            frame table here as well.
         */
 
-        // each frametable_entry is 4 bytes (32 bits)
+        //calculate the ram size to get size of frametable
+        paddr_t ramtop = ram_getsize();
 
-        paddr_t ft_base = MIPS_RAMTOP - ((MIPS_RAMTOP / PAGE_SIZE) * FT_ENTRY_SIZE);
-        frametable = (struct frame_table_entry *)ft_base;
+        int framespace = ((ramtop / PAGE_SIZE) * sizeof(struct frametable_entry));
 
+        //reserve space for frametable
+        frametable = kmalloc(framespace);
+        KASSERT(frametable != NULL);
+        memset(frametable, 0, framespace);
 
+        //reserve space for pagetable
+        int pagespace = sizeof(struct pagetable_entry)*framespace*2;
+        pagetable = kmalloc(pagespace);
+        KASSERT(pagetable != NULL);
+        memset(pagetable, 0, pagespace);
+
+        //reset the base of available memory
+        paddr_t freebase = ram_getfirstfree();
+
+        unsigned int i;
+        unsigned int bumpallocated = (freebase / PAGE_SIZE);
+        kprintf("bumpallocated: %d and Mem size: %d\n",bumpallocated * PAGE_SIZE, ramtop);
+        //set OS, pagetable and frametable frames as unavailable
+        for(i = 0; i < bumpallocated; i++){
+            frametable[i].used = FRAME_USED;
+            frametable[i].next_free = 0;
+        }
+        kprintf("USED Pages frame index: %d\n",i-1);
+        kprintf("FIRST free frame index: %d\n",i);
+        //set free memory as available and build free list
+        firstfreeframe = &(frametable[i]);
+        unsigned int freeframes = ((ramtop - freebase)/PAGE_SIZE)-1;
+        for (; i <  freeframes;i++) {
+            frametable[i].used = FRAME_UNUSED;
+            frametable[i].next_free = &(frametable[i+1]);
+        }
+        kprintf("Last free frame index: %d\n",i);
+        //set last page to point to 0
+        frametable[i].used = FRAME_UNUSED;
+        frametable[i].next_free = 0;
 }
 
 int

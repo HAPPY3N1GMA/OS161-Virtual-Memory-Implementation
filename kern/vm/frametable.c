@@ -10,6 +10,9 @@
  * function and call it from vm_bootstrap
  */
 
+#define FRAME_TO_PADDR 12
+#define PADDR_TO_FRAME FRAME_TO_PADDR
+
 static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
 
 /* Note that this function returns a VIRTUAL address, not a physical
@@ -20,50 +23,66 @@ static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
  * frame table has been initialised and call ram_stealmem() otherwise.
  */
 
-struct frametable_entry *frametable = 0; // use 0 if it doesn't work
+struct frametable_entry *frametable = 0;
 
 vaddr_t alloc_kpages(unsigned int npages)
 {
-        /*
-         * IMPLEMENT ME.  You should replace this code with a proper
-         *                implementation.
-         */
+        paddr_t paddr;
 
-        // whilst debugging, have this assert to catch weird behaviour
-        KASSERT(npages == 1);
-
-        // only allowed to allocate 1 page at a time
-        if (npages != 1) {
-          return NULL;
-        }
-
-        if (frametable == 0) { // vm sys not initialised
-
-          paddr_t paddr = ram_stealmem(npages);
-
+        if (firstfreeframe == 0 || frametable == 0) { // vm sys not initialised
+            spinlock_acquire(&stealmem_lock);
+            paddr = ram_stealmem(npages);
+            spinlock_release(&stealmem_lock);
         } else { // vm sys initialised
 
-          // use the allocater
+             KASSERT(firstfreeframe != 0);
+             //instead of kassert return correct error that this ran out of memory (think its 0)
 
+             KASSERT(firstfreeframe->used == FRAME_UNUSED);
+
+            //whilst debugging, have this assert to catch weird behaviour
+            KASSERT(npages == 1);
+
+            //only allowed to allocate 1 page at a time
+            if (npages != 1) {
+              return 0;
+            }
+
+          // use the allocater
+          spinlock_acquire(&stealmem_lock);
+          paddr = firstfreeframe - frametable;
+
+          kprintf("index = %d\n(firstfreeframe - frametable) = %d\nsizeof(struct frametable_entry) = %d\n",(int)paddr,(firstfreeframe - frametable),sizeof(struct frametable_entry));
+
+          paddr <<= FRAME_TO_PADDR;
+          KASSERT(paddr != 0);
+
+          firstfreeframe->used = FRAME_USED;
+          firstfreeframe = firstfreeframe->next_free;
+          spinlock_release(&stealmem_lock);
 
         }
 
+        KASSERT(paddr != 0);
+        return PADDR_TO_KVADDR(paddr);
 
-        /* OLD IMPLEMENTATION
-        paddr_t addr;
-
-        spinlock_acquire(&stealmem_lock);
-        addr = ram_stealmem(npages);
-        spinlock_release(&stealmem_lock);
-
-        if(addr == 0)
-                return 0;
-
-        return PADDR_TO_KVADDR(addr);
-        */
 }
 
 void free_kpages(vaddr_t addr)
 {
-        (void) addr;
+
+        paddr_t paddr = KVADDR_TO_PADDR(addr);
+
+        KASSERT(paddr != 0);
+
+        int index = paddr >> PADDR_TO_FRAME;
+
+        kprintf("index: %d\n",index);
+
+        spinlock_acquire(&stealmem_lock);
+        frametable[index].next_free = firstfreeframe;
+        frametable[index].used = FRAME_UNUSED;
+        firstfreeframe = &(frametable[index]);
+        spinlock_release(&stealmem_lock);
+
 }

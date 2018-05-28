@@ -1221,4 +1221,3 @@ kfree(void *ptr)
 		free_kpages((vaddr_t)ptr);
 	}
 }
-

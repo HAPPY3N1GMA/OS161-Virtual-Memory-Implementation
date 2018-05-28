@@ -58,7 +58,36 @@ void free_kpages(vaddr_t addr);
 /* TLB shootdown handling called from interprocessor_interrupt */
 void vm_tlbshootdown(const struct tlbshootdown *);
 
-struct frametable_entry *frametable; // extern ??
+extern struct frametable_entry *frametable; // extern ??
+extern struct pagetable_entry *pagetable;
+extern struct frametable_entry *firstfreeframe;
+
+
+
+#define FRAME_USED 1
+#define FRAME_UNUSED 0
+
+struct frametable_entry{
+    char used;
+    struct frametable_entry *next_free;
+};
+//if weird results swap the order for little endian
+struct EntryLo{
+    unsigned int unused : 8,
+                        global : 1,
+                        valid : 1,
+                        dirty : 1,
+                        nocache : 1,
+                        framenum : 20;
+};
+
+struct pagetable_entry{
+    struct addrspace *pid;
+    uint32_t pagenumber;
+    struct EntryLo EntryLo;
+    struct pagetable_entry *next;
+};
+
 
 
 #endif /* _VM_H_ */

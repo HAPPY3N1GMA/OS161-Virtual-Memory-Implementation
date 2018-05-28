@@ -67,7 +67,7 @@ kmallocthread(void *sm, unsigned long num)
 	void *oldptr=NULL;
 	void *oldptr2=NULL;
 	int i;
-
+	kprintf("mallocing start\n");
 	for (i=0; i<NTRIES; i++) {
 		ptr = kmalloc(ITEMSIZE);
 		if (ptr==NULL) {

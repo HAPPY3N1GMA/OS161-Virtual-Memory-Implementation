@@ -127,7 +127,6 @@ boot(void)
 	kheap_nextgeneration();
 
 	/* Late phase of initialization. */
-	vm_bootstrap();
 	kprintf_bootstrap();
 	exec_bootstrap();
 	thread_start_cpus();
@@ -136,6 +135,9 @@ boot(void)
 	vfs_setbootfs("emu0");
 
 	kheap_nextgeneration();
+
+    /* Donot Initialise VM until after all OS memoryhas been bump allocated */
+	vm_bootstrap();
 
 	/*
 	 * Make sure various things aren't screwed up.
