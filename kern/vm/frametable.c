@@ -10,9 +10,6 @@
  * function and call it from vm_bootstrap
  */
 
-
-#define MEMFULL -1
-
 #define FRAME_TO_PADDR 12
 #define PADDR_TO_FRAME FRAME_TO_PADDR
 
@@ -32,11 +29,13 @@ vaddr_t alloc_kpages(unsigned int npages)
 {
         paddr_t paddr;
 
-        if (frametable == 0) { // vm sys not initialised
+        /* VM System not Initialised - Use Bump Allocator */
+        if (frametable == 0) {
             spinlock_acquire(&stealmem_lock);
             paddr = ram_stealmem(npages);
             spinlock_release(&stealmem_lock);
-        } else { // vm sys initialised
+        } else {
+            /* VM System Initialised */
 
             //out of frames return 0
              if(firstfreeframe == 0){
@@ -60,7 +59,6 @@ vaddr_t alloc_kpages(unsigned int npages)
           };
 
           paddr <<= FRAME_TO_PADDR;
-          KASSERT(paddr != 0);
 
           firstfreeframe->used = FRAME_USED;
           firstfreeframe = firstfreeframe->next_free;
@@ -69,15 +67,12 @@ vaddr_t alloc_kpages(unsigned int npages)
 
         }
 
-        //KASSERT(paddr != 0);
-
         if(paddr == 0){
             kprintf("IT WAS ZERO! index = %d\n(firstfreeframe - frametable) = %d\nsizeof(struct frametable_entry) = %d\n",(int)paddr,(firstfreeframe - frametable),sizeof(struct frametable_entry));
             return 0;
         }
 
         return PADDR_TO_KVADDR(paddr);
-
 }
 
 void free_kpages(vaddr_t addr)
