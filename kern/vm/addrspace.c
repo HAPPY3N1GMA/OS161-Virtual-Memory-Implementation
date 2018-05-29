@@ -53,6 +53,8 @@ as_create(void)
 {
         struct addrspace *as;
 
+        kprintf("-----------------THIS IS CALLED-------------------\n");
+
         as = kmalloc(sizeof(struct addrspace));
         if (as == NULL) {
                 return NULL;
@@ -187,4 +189,3 @@ as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 
         return 0;
 }
-

@@ -6,6 +6,9 @@
 #include <vm.h>
 #include <machine/tlb.h>
 
+
+
+
 /* Place your page table functions here */
 
 struct frametable_entry *firstfreeframe = 0;
@@ -38,14 +41,20 @@ void vm_bootstrap(void)
 
         unsigned int i;
         unsigned int bumpallocated = (freebase / PAGE_SIZE);
-        kprintf("bumpallocated: %d and Mem size: %d\n",bumpallocated * PAGE_SIZE, ramtop);
+
+        if(DEBUGMSG){
+            kprintf("bumpallocated: %d and Mem size: %d\n",bumpallocated * PAGE_SIZE, ramtop);
+        };
+
         //set OS, pagetable and frametable frames as unavailable
         for(i = 0; i < bumpallocated; i++){
             frametable[i].used = FRAME_USED;
             frametable[i].next_free = 0;
         }
-        kprintf("USED Pages frame index: %d\n",i-1);
-        kprintf("FIRST free frame index: %d\n",i);
+        if(DEBUGMSG){
+            kprintf("USED Pages frame index: %d\n",i-1);
+            kprintf("FIRST free frame index: %d\n",i);
+        };
         //set free memory as available and build free list
         firstfreeframe = &(frametable[i]);
         unsigned int freeframes = ((ramtop - freebase)/PAGE_SIZE)-1;
@@ -53,7 +62,11 @@ void vm_bootstrap(void)
             frametable[i].used = FRAME_UNUSED;
             frametable[i].next_free = &(frametable[i+1]);
         }
-        kprintf("Last free frame index: %d\n",i);
+
+        if(DEBUGMSG){
+            kprintf("Last free frame index: %d\n",i);
+        };
+
         //set last page to point to 0
         frametable[i].used = FRAME_UNUSED;
         frametable[i].next_free = 0;

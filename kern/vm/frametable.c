@@ -52,7 +52,9 @@ vaddr_t alloc_kpages(unsigned int npages)
           spinlock_acquire(&stealmem_lock);
           paddr = firstfreeframe - frametable;
 
-          kprintf("index = %d\n(firstfreeframe - frametable) = %d\nsizeof(struct frametable_entry) = %d\n",(int)paddr,(firstfreeframe - frametable),sizeof(struct frametable_entry));
+          if(DEBUGMSG){
+              kprintf("index = %d\n(firstfreeframe - frametable) = %d\nsizeof(struct frametable_entry) = %d\n",(int)paddr,(firstfreeframe - frametable),sizeof(struct frametable_entry));
+          };
 
           paddr <<= FRAME_TO_PADDR;
           KASSERT(paddr != 0);
@@ -63,7 +65,7 @@ vaddr_t alloc_kpages(unsigned int npages)
 
         }
 
-        KASSERT(paddr != 0);
+        //KASSERT(paddr != 0);
         return PADDR_TO_KVADDR(paddr);
 
 }
@@ -77,7 +79,10 @@ void free_kpages(vaddr_t addr)
 
         int index = paddr >> PADDR_TO_FRAME;
 
-        kprintf("index: %d\n",index);
+        if(DEBUGMSG){
+            kprintf("index: %d\n",index);
+        };
+
 
         spinlock_acquire(&stealmem_lock);
         frametable[index].next_free = firstfreeframe;

@@ -63,6 +63,8 @@ extern struct pagetable_entry *pagetable;
 extern struct frametable_entry *firstfreeframe;
 
 
+#define DEBUGMSG 0 //temp used for debug messages
+
 
 #define FRAME_USED 1
 #define FRAME_UNUSED 0
