@@ -10,6 +10,9 @@
  * function and call it from vm_bootstrap
  */
 
+
+#define MEMFULL -1
+
 #define FRAME_TO_PADDR 12
 #define PADDR_TO_FRAME FRAME_TO_PADDR
 
@@ -29,16 +32,16 @@ vaddr_t alloc_kpages(unsigned int npages)
 {
         paddr_t paddr;
 
-        if (firstfreeframe == 0 || frametable == 0) { // vm sys not initialised
+        if (frametable == 0) { // vm sys not initialised
             spinlock_acquire(&stealmem_lock);
             paddr = ram_stealmem(npages);
             spinlock_release(&stealmem_lock);
         } else { // vm sys initialised
 
-             KASSERT(firstfreeframe != 0);
-             //instead of kassert return correct error that this ran out of memory (think its 0)
-
-             KASSERT(firstfreeframe->used == FRAME_UNUSED);
+            //out of frames return 0
+             if(firstfreeframe == 0){
+                 return 0;
+             }
 
             //whilst debugging, have this assert to catch weird behaviour
             KASSERT(npages == 1);
@@ -61,11 +64,18 @@ vaddr_t alloc_kpages(unsigned int npages)
 
           firstfreeframe->used = FRAME_USED;
           firstfreeframe = firstfreeframe->next_free;
+
           spinlock_release(&stealmem_lock);
 
         }
 
         //KASSERT(paddr != 0);
+
+        if(paddr == 0){
+            kprintf("IT WAS ZERO! index = %d\n(firstfreeframe - frametable) = %d\nsizeof(struct frametable_entry) = %d\n",(int)paddr,(firstfreeframe - frametable),sizeof(struct frametable_entry));
+            return 0;
+        }
+
         return PADDR_TO_KVADDR(paddr);
 
 }
@@ -89,5 +99,9 @@ void free_kpages(vaddr_t addr)
         frametable[index].used = FRAME_UNUSED;
         firstfreeframe = &(frametable[index]);
         spinlock_release(&stealmem_lock);
+
+        if(firstfreeframe == 0){
+            kprintf("ERROR THIS SHOULD NEVER HAPPEN!!!! free mem firstfreeframe was set to zero\n");
+        }
 
 }

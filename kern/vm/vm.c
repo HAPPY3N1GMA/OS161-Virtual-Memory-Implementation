@@ -26,15 +26,16 @@ void vm_bootstrap(void)
         int framespace = ((ramtop / PAGE_SIZE) * sizeof(struct frametable_entry));
 
         //reserve space for frametable
-        frametable = kmalloc(framespace);
-        KASSERT(frametable != NULL);
-        memset(frametable, 0, framespace);
+        struct frametable_entry *ft = kmalloc(framespace);
+        KASSERT(ft != NULL);
+        memset(ft, 0, framespace);
 
         //reserve space for pagetable
         int pagespace = sizeof(struct pagetable_entry)*framespace*2;
         pagetable = kmalloc(pagespace);
         KASSERT(pagetable != NULL);
         memset(pagetable, 0, pagespace);
+
 
         //reset the base of available memory
         paddr_t freebase = ram_getfirstfree();
@@ -48,19 +49,19 @@ void vm_bootstrap(void)
 
         //set OS, pagetable and frametable frames as unavailable
         for(i = 0; i < bumpallocated; i++){
-            frametable[i].used = FRAME_USED;
-            frametable[i].next_free = 0;
+            ft[i].used = FRAME_USED;
+            ft[i].next_free = 0;
         }
         if(DEBUGMSG){
             kprintf("USED Pages frame index: %d\n",i-1);
             kprintf("FIRST free frame index: %d\n",i);
         };
         //set free memory as available and build free list
-        firstfreeframe = &(frametable[i]);
+        firstfreeframe = &(ft[i]);
         unsigned int freeframes = ((ramtop - freebase)/PAGE_SIZE)-1;
         for (; i <  freeframes;i++) {
-            frametable[i].used = FRAME_UNUSED;
-            frametable[i].next_free = &(frametable[i+1]);
+            ft[i].used = FRAME_UNUSED;
+            ft[i].next_free = &(ft[i+1]);
         }
 
         if(DEBUGMSG){
@@ -68,8 +69,12 @@ void vm_bootstrap(void)
         };
 
         //set last page to point to 0
-        frametable[i].used = FRAME_UNUSED;
-        frametable[i].next_free = 0;
+        ft[i].used = FRAME_UNUSED;
+        ft[i].next_free = 0;
+
+        //to prevent the issue of
+        frametable = ft;
+
 }
 
 int
