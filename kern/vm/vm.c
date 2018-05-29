@@ -19,16 +19,16 @@ void vm_bootstrap(void)
         //calculate the ram size to get size of frametable
         paddr_t ramtop = ram_getsize();
 
-        int framespace = ((ramtop / PAGE_SIZE) * sizeof(struct frametable_entry));
+        int nframes = (ramtop / PAGE_SIZE);
 
         //reserve space for frametable
-        struct frametable_entry *ft = kmalloc(framespace);
+        struct frametable_entry *ft = kmalloc(nframes * sizeof(struct frametable_entry)));
         KASSERT(ft != NULL);
         memset(ft, 0, framespace);
 
         //reserve space for pagetable
-        int pagespace = sizeof(struct pagetable_entry)*framespace*2;
-        pagetable = kmalloc(pagespace);
+        int npages = (nframes * 2);
+        pagetable = kmalloc(npages * sizeof(struct pagetable_entry));
         KASSERT(pagetable != NULL);
         memset(pagetable, 0, pagespace);
 
