@@ -16,10 +16,6 @@ struct pagetable_entry *pagetable = 0;
 
 void vm_bootstrap(void)
 {
-        /* Initialise VM sub-system.  You probably want to initialise your
-           frame table here as well.
-        */
-
         //calculate the ram size to get size of frametable
         paddr_t ramtop = ram_getsize();
 
@@ -72,7 +68,7 @@ void vm_bootstrap(void)
         ft[i].used = FRAME_UNUSED;
         ft[i].next_free = 0;
 
-        //to prevent the issue of
+        //only set frametable to not be zero once all of bumpallocated and our vm is ready
         frametable = ft;
 
 }
