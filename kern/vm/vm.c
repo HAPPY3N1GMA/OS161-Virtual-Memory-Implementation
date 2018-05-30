@@ -113,10 +113,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     	    case VM_FAULT_READONLY:
                 return EFAULT;
     	    case VM_FAULT_READ:
-                break;
     	    case VM_FAULT_WRITE:
-                //advanced assignment to do with shared pages
-                panic("vm: got VM_FAULT_WRITE which is advanced assignment only not implemented\n");
     		      break;
     	    default:
     		      return EINVAL;
