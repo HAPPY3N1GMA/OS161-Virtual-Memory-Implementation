@@ -76,7 +76,7 @@ vaddr_t alloc_kpages(unsigned int npages)
         }
 
         //zero fill the page
-        as_zero_region(paddr, 1);
+        as_zero_region(paddr, npages);
 
         return PADDR_TO_KVADDR(paddr);
 }
