@@ -5,6 +5,7 @@
 #include <addrspace.h>
 #include <vm.h>
 
+
 /* Place your frametable data-structures here
  * You probably also want to write a frametable initialisation
  * function and call it from vm_bootstrap
@@ -12,6 +13,8 @@
 
 #define FRAME_TO_PADDR PAGE_BITS
 #define PADDR_TO_FRAME FRAME_TO_PADDR
+
+static void as_zero_region(paddr_t paddr, unsigned npages);
 
 static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
 
@@ -72,7 +75,17 @@ vaddr_t alloc_kpages(unsigned int npages)
             return 0;
         }
 
+        //zero fill the page
+        as_zero_region(paddr, 1);
+
         return PADDR_TO_KVADDR(paddr);
+}
+
+static
+void
+as_zero_region(paddr_t paddr, unsigned npages)
+{
+	bzero((void *)PADDR_TO_KVADDR(paddr), npages * PAGE_SIZE);
 }
 
 void free_kpages(vaddr_t addr)
