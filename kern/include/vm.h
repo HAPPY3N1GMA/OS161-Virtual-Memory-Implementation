@@ -65,15 +65,23 @@ extern struct frametable_entry *firstfreeframe;
 
 #define DEBUGMSG 0 //temp used for debug messages
 
+#define VALID_BIT 1
 
-#define FRAME_USED 1
+#define FRAME_USED VALID_BIT
 #define FRAME_UNUSED 0
+
+
+#define PAGE_BITS  12
 
 struct frametable_entry{
     char used;
     struct frametable_entry *next_free;
 };
+
+
+
 //if weird results swap the order for little endian
+
 struct EntryLo{
     unsigned int unused : 8,
                         global : 1,
@@ -83,10 +91,22 @@ struct EntryLo{
                         framenum : 20;
 };
 
+struct EntryHi{
+    unsigned int unused : 6,
+                        pid : 8,
+                        pagenum : 20;
+};
+
+typedef union {
+    struct EntryHi hi;
+    struct EntryLo lo;
+    uint32_t uint;
+} entry_t;
+
 struct pagetable_entry{
     struct addrspace *pid;
     uint32_t pagenumber;
-    struct EntryLo EntryLo;
+    entry_t entrylo;
     struct pagetable_entry *next;
 };
 

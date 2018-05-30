@@ -10,7 +10,7 @@
  * function and call it from vm_bootstrap
  */
 
-#define FRAME_TO_PADDR 12
+#define FRAME_TO_PADDR PAGE_BITS
 #define PADDR_TO_FRAME FRAME_TO_PADDR
 
 static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;

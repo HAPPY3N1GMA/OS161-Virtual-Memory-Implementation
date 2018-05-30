@@ -37,6 +37,7 @@
 
 #define PAGE_SIZE  4096         /* size of VM page */
 #define PAGE_FRAME 0xfffff000   /* mask for getting page number from addr */
+#define PAGE_OFFSET 0x00000fff   /* mask for getting page offset from addr */
 
 /*
  * MIPS-I hardwired memory layout:

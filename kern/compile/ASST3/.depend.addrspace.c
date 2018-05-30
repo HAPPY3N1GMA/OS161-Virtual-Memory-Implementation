@@ -9,4 +9,5 @@ addrspace.o: ../../vm/addrspace.c ../../include/types.h \
  includelinks/machine/thread.h ../../include/setjmp.h \
  includelinks/kern/machine/setjmp.h includelinks/mips/tlb.h \
  ../../include/addrspace.h ../../include/vm.h includelinks/machine/vm.h \
- opt-dumbvm.h ../../include/proc.h
+ opt-dumbvm.h ../../include/proc.h ../../include/elf.h \
+ includelinks/machine/elf.h

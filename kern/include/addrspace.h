@@ -48,6 +48,16 @@ struct vnode;
  * You write this.
  */
 
+ #define FIXED_STACK_SIZE 16
+
+
+struct region_spec{
+    uint32_t as_perms;
+     vaddr_t as_vbase;
+     size_t as_regsize;
+     struct region_spec *as_next;
+};
+
 struct addrspace {
 #if OPT_DUMBVM
         vaddr_t as_vbase1;
@@ -58,7 +68,7 @@ struct addrspace {
         size_t as_npages2;
         paddr_t as_stackpbase;
 #else
-        /* Put stuff here for your VM system */
+        struct region_spec *regions;
 #endif
 };
 

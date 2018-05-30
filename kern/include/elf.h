@@ -188,6 +188,7 @@ typedef struct {
 #define	PT_MIPS_REGINFO	0x70000000
 
 /* values for p_flags */
+#define OS_M	  0x8 /* Permission Modified by OS */
 #define	PF_R		0x4	/* Segment is readable */
 #define	PF_W		0x2	/* Segment is writable */
 #define	PF_X		0x1	/* Segment is executable */

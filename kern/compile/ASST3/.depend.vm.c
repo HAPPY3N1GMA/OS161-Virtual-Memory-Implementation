@@ -7,4 +7,6 @@ vm.o: ../../vm/vm.c ../../include/types.h ../../include/kern/types.h \
  includelinks/machine/thread.h ../../include/setjmp.h \
  includelinks/kern/machine/setjmp.h ../../include/addrspace.h \
  ../../include/vm.h includelinks/machine/vm.h opt-dumbvm.h \
- includelinks/machine/tlb.h
+ includelinks/machine/tlb.h ../../include/current.h \
+ includelinks/machine/current.h ../../include/proc.h ../../include/elf.h \
+ includelinks/machine/elf.h ../../include/spl.h
