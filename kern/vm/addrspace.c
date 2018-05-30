@@ -79,7 +79,13 @@ as_copy(struct addrspace *old, struct addrspace **ret)
     struct region_spec *curr = old->regions;
     /* copy all regions from old into new */
     while(curr!=NULL){
-        int result = as_define_region(newas, curr->as_vbase , curr->as_regsize, curr->as_perms, 0, 0);
+        int r = curr->as_perms & PF_R;
+        int w = curr->as_perms & PF_W;
+        int x = curr->as_perms & PF_X;
+
+
+        int result = as_define_region(newas, curr->as_vbase , curr->as_regsize, r, w, x);
+
         if(result){
             as_destroy(newas);
             return result;
@@ -153,7 +159,10 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
             return ENOMEM;
         }
 
-        region->as_perms = 0 | (readable | writeable | executable);
+        if(readable) region->as_perms |= PF_R;
+        if(writeable) region->as_perms |= PF_W;
+        if(executable) region->as_perms |= PF_X;
+
         region->as_vbase = vaddr;
         region->as_regsize = memsize;
         region->as_next = as->regions;
@@ -198,11 +207,26 @@ as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 {
     size_t stacksize = FIXED_STACK_SIZE * PAGE_SIZE;
     vaddr_t stackbase = USERSTACK - stacksize;
-    int result = as_define_region(as, stackbase, stacksize,PF_R, PF_W, 0);
+    int result = as_define_region(as, stackbase, stacksize, VALID_BIT, VALID_BIT, INVALID_BIT);
 
     if(result){
         return result;
     }
+
+    // if(as->regions->as_perms & PF_R){
+    //     kprintf("read flag not same\n");
+    //     panic(" read flag not same\n");
+    // }
+    // if(as->regions->as_perms & PF_W){
+    //     kprintf("write flag not same\n");
+    //     panic("write flag not same\n ");
+    // }
+    // if(as->regions->as_perms & PF_X){
+    //     kprintf("execute flag not same\n");
+    //     panic("execute flag not same\n ");
+    // }
+
+
 
     /* Initial user-level stack pointer */
     *stackptr = USERSTACK;

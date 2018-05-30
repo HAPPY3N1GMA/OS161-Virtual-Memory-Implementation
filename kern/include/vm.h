@@ -58,13 +58,14 @@ void free_kpages(vaddr_t addr);
 /* TLB shootdown handling called from interprocessor_interrupt */
 void vm_tlbshootdown(const struct tlbshootdown *);
 
-extern struct frametable_entry *frametable; // extern ??
+extern struct frametable_entry *frametable;
 extern struct pagetable_entry *pagetable;
 extern struct frametable_entry *firstfreeframe;
 
 
 #define DEBUGMSG 0 //temp used for debug messages
 
+#define INVALID_BIT 0
 #define VALID_BIT 1
 
 #define FRAME_USED VALID_BIT
@@ -72,6 +73,8 @@ extern struct frametable_entry *firstfreeframe;
 
 
 #define PAGE_BITS  12
+#define FRAME_TO_PADDR PAGE_BITS
+#define PADDR_TO_FRAME FRAME_TO_PADDR
 
 struct frametable_entry{
     char used;
@@ -83,19 +86,22 @@ struct frametable_entry{
 //if weird results swap the order for little endian
 
 struct EntryLo{
-    unsigned int unused : 8,
-                        global : 1,
-                        valid : 1,
-                        dirty : 1,
+    unsigned int
+                        framenum : 20,
                         nocache : 1,
-                        framenum : 20;
+                        dirty : 1,
+                        valid : 1,
+                        global : 1,
+                        unused : 8;
 };
 
+
 struct EntryHi{
-    unsigned int unused : 6,
+    unsigned int pagenum : 20,
                         pid : 6,
-                        pagenum : 20;
+                        unused : 6;
 };
+
 
 typedef union {
     struct EntryHi hi;

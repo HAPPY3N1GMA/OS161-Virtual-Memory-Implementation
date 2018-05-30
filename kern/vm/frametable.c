@@ -11,8 +11,6 @@
  * function and call it from vm_bootstrap
  */
 
-#define FRAME_TO_PADDR PAGE_BITS
-#define PADDR_TO_FRAME FRAME_TO_PADDR
 
 static void as_zero_region(paddr_t paddr, unsigned npages);
 
@@ -31,6 +29,7 @@ struct frametable_entry *frametable = 0;
 vaddr_t alloc_kpages(unsigned int npages)
 {
         paddr_t paddr;
+
 
         /* VM System not Initialised - Use Bump Allocator */
         if (frametable == 0) {
@@ -78,6 +77,8 @@ vaddr_t alloc_kpages(unsigned int npages)
         //zero fill the page
         as_zero_region(paddr, npages);
 
+        //kprintf("---------ending alloc_kpages---------\n");
+
         return PADDR_TO_KVADDR(paddr);
 }
 
@@ -90,7 +91,6 @@ as_zero_region(paddr_t paddr, unsigned npages)
 
 void free_kpages(vaddr_t addr)
 {
-
         paddr_t paddr = KVADDR_TO_PADDR(addr);
 
         KASSERT(paddr != 0);
@@ -111,5 +111,4 @@ void free_kpages(vaddr_t addr)
         if(firstfreeframe == 0){
             kprintf("ERROR THIS SHOULD NEVER HAPPEN!!!! free mem firstfreeframe was set to zero\n");
         }
-
 }

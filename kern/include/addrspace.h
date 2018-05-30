@@ -54,6 +54,7 @@ struct vnode;
 struct region_spec{
     uint32_t as_perms;
      vaddr_t as_vbase;
+     vaddr_t as_pbase;
      size_t as_regsize;
      struct region_spec *as_next;
 };
