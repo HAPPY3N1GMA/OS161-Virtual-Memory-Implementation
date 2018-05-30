@@ -93,7 +93,7 @@ struct EntryLo{
 
 struct EntryHi{
     unsigned int unused : 6,
-                        pid : 8,
+                        pid : 6,
                         pagenum : 20;
 };
 

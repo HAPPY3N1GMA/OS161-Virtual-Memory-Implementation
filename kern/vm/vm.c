@@ -145,7 +145,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
         /* Look up page table Hashed Index. */
         uint32_t index = hpt_hash(as, faultframe);
+
         ///uint32_t pid = (uint32_t)as;
+
         struct pagetable_entry *hpt_entry = &(pagetable[index]);
 
         /* Look up in page table to see if there is a VALID translation. */
