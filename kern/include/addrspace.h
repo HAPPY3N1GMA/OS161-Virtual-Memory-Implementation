@@ -143,5 +143,7 @@ int load_elf(struct vnode *v, vaddr_t *entrypoint);
 struct pagetable_entry * find_entry(struct addrspace *as, vaddr_t vaddr);
 struct pagetable_entry * insert_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber, uint32_t *hi);
 struct pagetable_entry *find_entry_parent(struct addrspace *as, vaddr_t vaddr, struct pagetable_entry **hpt_entry);
+void  init_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber);
+
 
 #endif /* _ADDRSPACE_H_ */

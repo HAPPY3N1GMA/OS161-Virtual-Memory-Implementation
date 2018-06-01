@@ -21,6 +21,9 @@
 struct frametable_entry *firstfreeframe = 0;
 struct pagetable_entry *pagetable = 0;
 
+struct spinlock frametable_lock = SPINLOCK_INITIALIZER;
+struct spinlock pagetable_lock = SPINLOCK_INITIALIZER;
+
 
 ////////////////////////////////////
 #define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
@@ -44,37 +47,12 @@ struct pagetable_entry *pagetable = 0;
 
 void vm_bootstrap(void)
 {
-        //
-        // uint32_t valid = TLBLO_VALID;
-        // kprintf("valid: %d\n",valid);
-        //     entry_t test;
-        //     test.uint = 0;
-        //
-        //     kprintf("\nbefore test.uint: %d and valid set: %d\n",test.uint,test.lo.valid);
-        //
-        //
-        //     kprintf("\nshould be zero "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(test.uint));
-        //
-        //     test.lo.valid = 1;
-        //
-        //     kprintf("\ntest.uint: %d and valid set: %d\n",test.uint,test.lo.valid);
-        //
-        //     kprintf("\nvalid bit should be one "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(test.uint));
-        //     kprintf("\nit should match "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(valid));
-        //
-        //
-        //     if(test.uint & valid){
-        //         panic("IT WAS SET\n ");
-        //     }
-
-
-
         //calculate the ram size to get size of frametable
         paddr_t ramtop = ram_getsize();
 
+        //reserve space for frametable
         int nframes = (ramtop / PAGE_SIZE);
         framespace = nframes * sizeof(struct frametable_entry);
-        //reserve space for frametable
         struct frametable_entry *ft = kmalloc(framespace);
         KASSERT(ft != NULL);
         memset(ft, 0, framespace);
@@ -86,26 +64,18 @@ void vm_bootstrap(void)
         KASSERT(pagetable != NULL);
         memset(pagetable, 0, pagespace);
 
-
         //reset the base of available memory
         paddr_t freebase = ram_getfirstfree();
 
         unsigned int i;
         unsigned int bumpallocated = (freebase / PAGE_SIZE);
 
-        if(DEBUGMSG){
-            kprintf("bumpallocated: %d and Mem size: %d\n",bumpallocated * PAGE_SIZE, ramtop);
-        };
-
         //set OS, pagetable and frametable frames as unavailable
         for(i = 0; i < bumpallocated; i++){
             ft[i].used = FRAME_USED;
             ft[i].next_free = 0;
         }
-        if(DEBUGMSG){
-            kprintf("USED Pages frame pagenumber: %d\n",i-1);
-            kprintf("FIRST free frame pagenumber: %d\n",i);
-        };
+
         //set free memory as available and build free list
         firstfreeframe = &(ft[i]);
         unsigned int freeframes = ((ramtop - freebase)/PAGE_SIZE)-1;
@@ -113,10 +83,6 @@ void vm_bootstrap(void)
             ft[i].used = FRAME_UNUSED;
             ft[i].next_free = &(ft[i+1]);
         }
-
-        if(DEBUGMSG){
-            kprintf("Last free frame pagenumber: %d\n",i);
-        };
 
         //set last page to point to 0
         ft[i].used = FRAME_UNUSED;
@@ -144,25 +110,35 @@ void vm_bootstrap(void)
 int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
+
+    /* No process. This is probably a kernel fault early in boot process*/
+    if (curproc == NULL) {
+           return EFAULT;
+    }
+
+    struct addrspace *as = proc_getas();
+    /* No address space set up. */
+    if (as == NULL) {
+        return EFAULT;
+    }
+
+    struct region_spec *currregion = as->regions;
+
     	switch (faulttype) {
     	    case VM_FAULT_READONLY:
                 return EFAULT;
     	    case VM_FAULT_READ:
+                if (~(currregion->as_perms) & PF_R) {
+                    return EFAULT;
+                }
+                break;
     	    case VM_FAULT_WRITE:
-    		      break;
+                if (~(currregion->as_perms) & PF_W) {
+                    return EFAULT;
+                }
+    		    break;
     	    default:
     		      return EINVAL;
-    	}
-
-        /* No process. This is probably a kernel fault early in boot process*/
-        if (curproc == NULL) {
-    	       return EFAULT;
-    	}
-
-        struct addrspace *as = proc_getas();
-        /* No address space set up. */
-        if (as == NULL) {
-    		return EFAULT;
     	}
 
         /* Look up page table Hashed index. */
@@ -172,37 +148,43 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         entryhi = entrylo = 0;
 
         /* Look up in page table for VALID translation and load into TLB. */
-        struct pagetable_entry *hpt_entry = find_entry(as, faultaddress);
-        if(hpt_entry!=NULL){
+        struct pagetable_entry *curr_entry = find_entry(as, faultaddress);
+
+        spinlock_acquire(&pagetable_lock);
+
+        if(curr_entry!=NULL){
+            /* Found existing pagetable entry and existing frameentry*/
             entry_t ehi;
             set_entryhi(&(ehi.hi),pagenumber);
             entryhi = ehi.uint;
-            entrylo = hpt_entry->entrylo.uint;
+            entrylo = curr_entry->entrylo.uint;
         }else{
             /* No PageTable Entry Found -> read in a new page */
+
             vaddr_t faultframe = faultaddress & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
             uint32_t index = hpt_hash(as, faultframe);
-            hpt_entry = &(pagetable[index]);
+            curr_entry = &(pagetable[index]);
 
-            struct region_spec *currregion = as->regions;
             while(currregion != NULL){
 
                 /* check faultaddr is a valid region */
                 if(faultaddress >= currregion->as_vbase &&
                      faultaddress < (currregion->as_vbase + (currregion->as_npages*PAGE_SIZE))){
                          /* insert new page table entry */
-                         hpt_entry = insert_entry(as, hpt_entry, currregion, pagenumber, &entryhi);
-                         if(hpt_entry==NULL){
+                         curr_entry = insert_entry(as, curr_entry, currregion, pagenumber, &entryhi);
+                         if(curr_entry==NULL){
+                             spinlock_release(&pagetable_lock);
                              return ENOMEM;
                          }
-                         entrylo = hpt_entry->entrylo.uint;
+                         entrylo = curr_entry->entrylo.uint;
                     break;
                 }
                 currregion = currregion->as_next;
             }
 
             if(currregion==NULL){
-                panic("vm: faultaddress not in any valid region: %d\n",faultaddress);
+                //panic("vm: faultaddress not in any valid region: %d | 0x%x\n",faultaddress,faultaddress);
+                spinlock_release(&pagetable_lock);
                 return EFAULT;
             }
 
@@ -210,6 +192,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
         if(entryhi==0 || entrylo == 0){
             panic("Serious error here...");
+            spinlock_release(&pagetable_lock);
             return EFAULT;
         }
 
@@ -217,6 +200,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         int spl = splhigh();
         tlb_random(entryhi,entrylo);
         splx(spl);
+
+        spinlock_release(&pagetable_lock);
 
         return 0;
 }

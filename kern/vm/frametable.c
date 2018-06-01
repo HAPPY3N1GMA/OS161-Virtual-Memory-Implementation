@@ -12,10 +12,8 @@
  * function and call it from vm_bootstrap
  */
 
-
 static void as_zero_region(paddr_t paddr, unsigned npages);
 
-static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
 
 /* Note that this function returns a VIRTUAL address, not a physical
  * address
@@ -32,13 +30,13 @@ alloc_kpages(unsigned int npages)
 {
         paddr_t paddr;
 
-
         /* VM System not Initialised - Use Bump Allocator */
         if (frametable == 0) {
-            spinlock_acquire(&stealmem_lock);
+            spinlock_acquire(&frametable_lock);
             paddr = ram_stealmem(npages);
-            spinlock_release(&stealmem_lock);
+            spinlock_release(&frametable_lock);
         } else {
+
             /* VM System Initialised */
 
             //out of frames return 0
@@ -54,21 +52,16 @@ alloc_kpages(unsigned int npages)
               return 0;
             }
 
-          // use the allocater
-          spinlock_acquire(&stealmem_lock);
+          spinlock_acquire(&frametable_lock);
+
           paddr = firstfreeframe - frametable;
-
-          if(DEBUGMSG){
-              kprintf("index = %d\n(firstfreeframe - frametable) = %d\nsizeof(struct frametable_entry) = %d\n",(int)paddr,(firstfreeframe - frametable),sizeof(struct frametable_entry));
-          };
-
           paddr <<= FRAME_TO_PADDR;
-
           firstfreeframe->used = FRAME_USED;
           firstfreeframe = firstfreeframe->next_free;
 
-          spinlock_release(&stealmem_lock);
+          //kprintf("firstfreeframe: 0x%p\n",firstfreeframe);
 
+          spinlock_release(&frametable_lock);
         }
 
         if(paddr == 0){
@@ -79,8 +72,6 @@ alloc_kpages(unsigned int npages)
         //zero fill the page
         as_zero_region(paddr, npages);
 
-        //kprintf("---------ending alloc_kpages---------\n");
-
         return PADDR_TO_KVADDR(paddr);
 }
 
@@ -88,14 +79,18 @@ static
 void
 as_zero_region(paddr_t paddr, unsigned npages)
 {
+//     (void)paddr;
+//     (void)npages;
+//
+// //    kprintf("npages: %d paddr: %x translated: %x\n",npages,paddr,PADDR_TO_KVADDR(paddr));
+//
+//     return;
 	bzero((void *)PADDR_TO_KVADDR(paddr), npages * PAGE_SIZE);
 }
 
 
 
 
-
-//ummm is this right? because we have a virtual system now...
 void
 free_kpages(vaddr_t addr)
 {
@@ -104,6 +99,7 @@ free_kpages(vaddr_t addr)
             // Do nothing -> Leak the memory
             return;
         } else {
+
         /* VM System Initialised */
         paddr_t paddr = KVADDR_TO_PADDR(addr);
         if(paddr == 0){
@@ -115,24 +111,32 @@ free_kpages(vaddr_t addr)
         //find the pagetable entry
         struct addrspace *as = proc_getas();
 
-        //lock access to pagetable!
         struct pagetable_entry *hpt_entry = NULL;
+        spinlock_acquire(&pagetable_lock);
         struct pagetable_entry *prev = find_entry_parent(as, addr, &hpt_entry);
         if(hpt_entry!=NULL){
             /* relink pagetable */
             if(prev != NULL){
+                /* you are in the chain */
                 prev->next = hpt_entry->next;
+                kfree(hpt_entry);
+            }else{
+                /* you are the head of the chain */
+                if(hpt_entry->next){
+                    /* if chained entries exist*/
+                    memcpy(hpt_entry,hpt_entry->next,sizeof(struct pagetable_entry));
+                    kfree(hpt_entry->next);
+                }
+                memset(hpt_entry,0,sizeof(struct pagetable_entry));
             }
-            /* free pagetable entry */
-            kfree(hpt_entry);
-            //unlock access to pagetable
         }
+        spinlock_release(&pagetable_lock);
 
-        spinlock_acquire(&stealmem_lock);
+        spinlock_acquire(&frametable_lock);
         frametable[index].next_free = firstfreeframe;
         frametable[index].used = FRAME_UNUSED;
         firstfreeframe = &(frametable[index]);
-        spinlock_release(&stealmem_lock);
+        spinlock_release(&frametable_lock);
 
         if(firstfreeframe == 0){
             kprintf("ERROR THIS SHOULD NEVER HAPPEN!!!! free mem firstfreeframe was set to zero\n");
@@ -173,36 +177,31 @@ find_entry_parent(struct addrspace *as, vaddr_t vaddr, struct pagetable_entry **
 
 
 
-//WE NEED A FILETABLE.H
 struct pagetable_entry *
 insert_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber, uint32_t *hi){
 
-    //allocate a new frame
-    vaddr_t kvaddr = alloc_kpages(1);
-
     /* externally chaining the new page table entry */
-    if(hpt_entry!=NULL){
+    if(hpt_entry==NULL){
+        panic("THIS SHOULD NOT BE NULL\n");
+    }
+
+    /* assign a page frame */
+
+    //are we updating the first entry
+    if(hpt_entry->pid!=NULL){
+
         struct pagetable_entry *new = kmalloc(sizeof(struct pagetable_entry));
         if(new==NULL){
             return NULL;
         }
+
+        init_entry(as, hpt_entry, region, pagenumber);
         new->next = hpt_entry->next;
         hpt_entry->next = new;
         hpt_entry = new;
     }else{
-        hpt_entry->next = NULL;
+        init_entry(as, hpt_entry, region, pagenumber);
     }
-
-    //we update the pagetable entry
-    hpt_entry->pid = as;
-    hpt_entry->pagenumber = pagenumber;
-
-    /* set the entrylo */
-    paddr_t paddr = KVADDR_TO_PADDR(kvaddr);
-    uint32_t framenum = paddr >> 12;//faultaddress - region->as_vbase) + region->as_pbase;
-    int dirtybit = 0;
-    if(region->as_perms & PF_W) dirtybit = 1;
-    set_entrylo (&(hpt_entry->entrylo.lo), VALID_BIT, dirtybit, framenum);
 
     /* set the entryhi */
     entry_t ehi;
@@ -210,4 +209,22 @@ insert_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct reg
     *hi = ehi.uint;
 
     return hpt_entry;
+}
+
+void
+init_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber){
+        //we update the pagetable entry
+        hpt_entry->pid = as;
+        hpt_entry->pagenumber = pagenumber;
+        hpt_entry->next = NULL;
+
+        //allocate a new frame
+        vaddr_t kvaddr = alloc_kpages(1);
+
+        /* set the entrylo */
+        paddr_t paddr = KVADDR_TO_PADDR(kvaddr);
+        uint32_t framenum = paddr >> PADDR_TO_FRAME;//faultaddress - region->as_vbase) + region->as_pbase;
+        int dirtybit = 0;
+        if(region->as_perms & PF_W) dirtybit = 1;
+        set_entrylo (&(hpt_entry->entrylo.lo), VALID_BIT, dirtybit, framenum);
 }

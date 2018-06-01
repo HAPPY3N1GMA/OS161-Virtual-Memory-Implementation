@@ -112,6 +112,9 @@ struct pagetable_entry{
     struct pagetable_entry *next;
 };
 
+extern struct spinlock pagetable_lock;
+extern struct spinlock frametable_lock;
+
 void set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum);
 void set_entryhi (struct EntryHi *entryhi, uint32_t pagenumber);
 

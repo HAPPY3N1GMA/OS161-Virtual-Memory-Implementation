@@ -39,6 +39,10 @@
 #include <proc.h>
 #include <elf.h>
 
+
+static void copyframe(struct pagetable_entry *from, struct pagetable_entry *to);
+
+
 /*
  * Note! If OPT_DUMBVM is set, as is the case until you start the VM
  * assignment, this file is not compiled or linked or in any way
@@ -64,70 +68,135 @@ as_create(void)
 int
 as_copy(struct addrspace *old, struct addrspace **ret)
 {
+
     *ret = NULL;
 
     if(old==NULL){
         return 0;
     }
 
-    struct addrspace *newas;
-    newas = as_create();
-    if (newas==NULL) {
+    struct addrspace *new;
+    new = as_create();
+    if (new==NULL) {
             return ENOMEM;
     }
 
-    struct region_spec *curr = old->regions;
+    struct region_spec *curr_region = old->regions;
+
     /* copy all regions from old into new */
-    while(curr!=NULL){
-        int r = curr->as_perms & PF_R;
-        int w = curr->as_perms & PF_W;
-        int x = curr->as_perms & PF_X;
-        int result = as_define_region(newas, curr->as_vbase , curr->as_npages * PAGE_SIZE, r, w, x);
+    while(curr_region!=NULL){
+        int r = curr_region->as_perms & PF_R;
+        int w = curr_region->as_perms & PF_W;
+        int x = curr_region->as_perms & PF_X;
+        int result = as_define_region(new, curr_region->as_vbase , curr_region->as_npages * PAGE_SIZE, r, w, x);
         if(result){
-            as_destroy(newas);
+            as_destroy(new);
             return result;
         }
 
         //copyin new page frames --> advanced will share page frames instead
 
         /* Look up page frames in this region*/
-        vaddr_t faultframe = curr->as_vbase & PAGE_FRAME;
-        uint32_t old_index = hpt_hash(old, faultframe);
-        struct pagetable_entry *old_entry = &(pagetable[old_index]);
-        struct pagetable_entry *next = NULL;
+        vaddr_t curr_frame = curr_region->as_vbase & PAGE_FRAME;
+        uint32_t old_index = hpt_hash(old, curr_frame);
+        struct pagetable_entry *curr_hpt = &(pagetable[old_index]);
+        struct pagetable_entry *prev_hpt = NULL;
 
-        /* copy all frames */
-        while(old_entry!=NULL){
-            next = old_entry->next;
-            uint32_t ehi; //not used
-            //need to grab next entry first as it is possible that the insertion will insert directly after the current oldhpt creating infinite loop
-            struct pagetable_entry *new_entry = insert_entry(newas, old_entry, curr, old_entry->pagenumber, &ehi);
-            //if return null then destroy all and return error
-            if(new_entry==NULL){
-                //TODO DESTROY HERE ALL MADE NEW ENTRIES SOMEHOW???!
-                return ENOMEM;
+
+        struct pagetable_entry *new_chain = NULL;
+
+        /* copy all relevant frames in this region*/
+        while(curr_hpt!=NULL){
+            if(old==curr_hpt->pid){
+
+                struct pagetable_entry *new_entry = kmalloc(sizeof(struct pagetable_entry));
+                if(new_entry==NULL){
+                    //free allready newly chained entries
+                    return ENOMEM;
+                }
+
+                /* initialise pagetable entry contents */
+                init_entry(new, new_entry, curr_region, curr_hpt->pagenumber);
+
+                /* link into new chain */
+                if(new_chain==NULL){
+                    new_chain = new_entry;
+                }else{
+                    new_entry->next = new_chain;
+                    new_chain = new_entry;
+                }
+
+                /* copy frame contents */
+                copyframe(curr_hpt, new_entry);
             }
 
-            old_entry = next;
+            prev_hpt = curr_hpt;
+            curr_hpt = curr_hpt->next;
         }
 
+        /* link new chain onto end of existing chain */
+        if(prev_hpt != NULL){
+            prev_hpt->next = new_chain;
+        }
 
-
-        curr = curr->as_next;
+        curr_region = curr_region->as_next;
     }
 
-    *ret = newas;
+    *ret = new;
     return 0;
 }
+
+
+/*
+    copy frame from a to b
+*/
+static void
+copyframe(struct pagetable_entry *from, struct pagetable_entry *to){
+    int from_frame = from->entrylo.lo.framenum;
+    paddr_t from_paddr = from_frame<<FRAME_TO_PADDR;
+    int to_frame = to->entrylo.lo.framenum;
+    paddr_t to_paddr = to_frame<<FRAME_TO_PADDR;
+    to_paddr = PADDR_TO_KVADDR(to_paddr);
+    from_paddr = PADDR_TO_KVADDR(from_paddr);
+    memcpy((void *)to_paddr,(void *)from_paddr,PAGE_SIZE);
+}
+
+
+
 
 void
 as_destroy(struct addrspace *as)
 {
-        /*
-         * Clean up as needed.
-         */
 
-        kfree(as);
+    /* free all pages and frames */
+
+    int npages = pagespace / sizeof(struct pagetable_entry);
+
+    for (int i = 0; i < npages; i++) {
+        struct pagetable_entry *curr_page = &pagetable[i];
+        struct pagetable_entry *next_page = NULL;
+        while(curr_page!=NULL){
+                next_page = curr_page->next;
+                /* free each page and frame */
+                if(curr_page->pid == as){
+                    paddr_t framenum = (curr_page->entrylo.lo.framenum)<<FRAME_TO_PADDR;
+                    free_kpages(PADDR_TO_KVADDR(framenum));
+                }
+                curr_page = next_page;
+        }
+
+    }
+
+    /* free all regions */
+    struct region_spec *curr_region = as->regions;
+    struct region_spec *next_region = NULL;
+    while(curr_region!=NULL){
+        next_region = curr_region->as_next;
+        kfree(curr_region);
+        curr_region = next_region;
+    }
+
+    kfree(as);
 }
 
 void
@@ -180,11 +249,11 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
         size_t npages;
 
         /* Align the region. First, the base... */
-        memsize += vaddr & ~(vaddr_t)PAGE_FRAME;
-        vaddr &= PAGE_FRAME;
+        memsize += vaddr & ~(vaddr_t)PAGE_FRAME; //add offset onto memsize
+        vaddr &= PAGE_FRAME; //chop the offset off the virtual address
 
         /* ...and now the length. */
-        memsize = (memsize + PAGE_SIZE - 1) & PAGE_FRAME;
+        memsize = (memsize + PAGE_SIZE - 1) & PAGE_FRAME; //ceiling memsize to nearest pagesize
 
         npages = memsize / PAGE_SIZE;
 
@@ -208,15 +277,15 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
 int
 as_prepare_load(struct addrspace *as)
 {
-        struct region_spec *curr = as->regions;
+        struct region_spec *curr_region = as->regions;
 
         //set all regions as read write -> temp until extended assignment
-        while(curr!=NULL){
-            if(!(curr->as_perms & PF_W)){
+        while(curr_region!=NULL){
+            if(!(curr_region->as_perms & PF_W)){
                 //modified flag so that we can revert the wrtie flag after load
-                curr->as_perms |= (PF_W | OS_M );
+                curr_region->as_perms |= (PF_W | OS_M );
             }
-            curr = curr->as_next;
+            curr_region = curr_region->as_next;
         }
         return 0;
 }
@@ -232,17 +301,17 @@ as_prepare_load(struct addrspace *as)
 int
 as_complete_load(struct addrspace *as)
 {
-    struct region_spec *curr = as->regions;
-    while(curr!=NULL){
+    struct region_spec *curr_region = as->regions;
+    while(curr_region!=NULL){
         /* remove modified and writeable flags from modified regions */
-        if(curr->as_perms & OS_M){
-            curr->as_perms &= ~(PF_W | OS_M );
+        if(curr_region->as_perms & OS_M){
+            curr_region->as_perms &= ~(PF_W | OS_M );
 
             // https://piazza.com/class/jdwg14qxhhb4kp?cid=536
 
             /* Look up page frames in this region*/
-            vaddr_t faultframe = curr->as_vbase & PAGE_FRAME;
-            uint32_t index = hpt_hash(as, faultframe);
+            vaddr_t frame = curr_region->as_vbase & PAGE_FRAME;
+            uint32_t index = hpt_hash(as, frame);
             struct pagetable_entry *hpt_entry = &(pagetable[index]);
 
             /* Set all entries dirty bit to read only */
@@ -252,7 +321,7 @@ as_complete_load(struct addrspace *as)
             }
 
         }
-        curr = curr->as_next;
+        curr_region = curr_region->as_next;
     }
 
     /* Flush TLB */
