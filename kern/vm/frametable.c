@@ -4,6 +4,7 @@
 #include <thread.h>
 #include <addrspace.h>
 #include <vm.h>
+#include <elf.h>
 
 
 /* Place your frametable data-structures here
@@ -26,7 +27,8 @@ static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
 
 struct frametable_entry *frametable = 0;
 
-vaddr_t alloc_kpages(unsigned int npages)
+vaddr_t
+alloc_kpages(unsigned int npages)
 {
         paddr_t paddr;
 
@@ -89,7 +91,13 @@ as_zero_region(paddr_t paddr, unsigned npages)
 	bzero((void *)PADDR_TO_KVADDR(paddr), npages * PAGE_SIZE);
 }
 
-void free_kpages(vaddr_t addr)
+
+
+
+
+//ummm is this right? because we have a virtual system now... and when we free we free not at just an index, but we may want an actual page???
+void
+free_kpages(vaddr_t addr)
 {
         paddr_t paddr = KVADDR_TO_PADDR(addr);
 
@@ -111,4 +119,45 @@ void free_kpages(vaddr_t addr)
         if(firstfreeframe == 0){
             kprintf("ERROR THIS SHOULD NEVER HAPPEN!!!! free mem firstfreeframe was set to zero\n");
         }
+}
+
+
+
+//WE NEED A FILETABLE.H
+struct pagetable_entry *
+insert_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber, uint32_t *hi){
+
+    //allocate a new frame
+    vaddr_t kvaddr = alloc_kpages(1);
+
+    /* externally chaining the new page table entry */
+    if(hpt_entry!=NULL){
+        struct pagetable_entry *new = kmalloc(sizeof(struct pagetable_entry));
+        if(new==NULL){
+            return NULL;
+        }
+        new->next = hpt_entry->next;
+        hpt_entry->next = new;
+        hpt_entry = new;
+    }else{
+        hpt_entry->next = NULL;
+    }
+
+    //we update the pagetable entry
+    hpt_entry->pid = as;
+    hpt_entry->pagenumber = pagenumber;
+
+    /* set the entrylo */
+    paddr_t paddr = KVADDR_TO_PADDR(kvaddr);
+    uint32_t framenum = paddr >> 12;//faultaddress - region->as_vbase) + region->as_pbase;
+    int dirtybit = 0;
+    if(region->as_perms & PF_W) dirtybit = 1;
+    set_entrylo (&(hpt_entry->entrylo.lo), VALID_BIT, dirtybit, framenum);
+
+    /* set the entryhi */
+    entry_t ehi;
+    set_entryhi(&(ehi.hi),pagenumber);
+    *hi = ehi.uint;
+
+    return hpt_entry;
 }

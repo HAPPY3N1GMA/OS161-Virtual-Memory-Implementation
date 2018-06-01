@@ -39,6 +39,7 @@
 
 #include <machine/vm.h>
 
+
 /* Fault-type arguments to vm_fault() */
 #define VM_FAULT_READ        0    /* A read was attempted */
 #define VM_FAULT_WRITE       1    /* A write was attempted */
@@ -81,10 +82,6 @@ struct frametable_entry{
     struct frametable_entry *next_free;
 };
 
-
-
-//if weird results swap the order for little endian
-
 struct EntryLo{
     unsigned int
                         framenum : 20,
@@ -95,13 +92,11 @@ struct EntryLo{
                         unused : 8;
 };
 
-
 struct EntryHi{
     unsigned int pagenum : 20,
                         pid : 6,
                         unused : 6;
 };
-
 
 typedef union {
     struct EntryHi hi;
@@ -116,6 +111,8 @@ struct pagetable_entry{
     struct pagetable_entry *next;
 };
 
+void set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum);
+void set_entryhi (struct EntryHi *entryhi, uint32_t pagenumber);
 
 
 #endif /* _VM_H_ */

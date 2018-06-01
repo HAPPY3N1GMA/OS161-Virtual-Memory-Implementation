@@ -82,14 +82,37 @@ as_copy(struct addrspace *old, struct addrspace **ret)
         int r = curr->as_perms & PF_R;
         int w = curr->as_perms & PF_W;
         int x = curr->as_perms & PF_X;
-
-
-        int result = as_define_region(newas, curr->as_vbase , curr->as_regsize, r, w, x);
-
+        int result = as_define_region(newas, curr->as_vbase , curr->as_npages * PAGE_SIZE, r, w, x);
         if(result){
             as_destroy(newas);
             return result;
         }
+
+        //copyin new page frames --> advanced will share page frames instead
+
+        /* Look up page frames in this region*/
+        vaddr_t faultframe = curr->as_vbase & PAGE_FRAME;
+        uint32_t old_index = hpt_hash(old, faultframe);
+        struct pagetable_entry *old_entry = &(pagetable[old_index]);
+        struct pagetable_entry *next = NULL;
+
+        /* copy all frames */
+        while(old_entry!=NULL){
+            next = old_entry->next;
+            uint32_t ehi; //not used
+            //need to grab next entry first as it is possible that the insertion will insert directly after the current oldhpt creating infinite loop
+            struct pagetable_entry *new_entry = insert_entry(newas, old_entry, curr, old_entry->pagenumber, &ehi);
+            //if return null then destroy all and return error
+            if(new_entry==NULL){
+                //TODO DESTROY HERE ALL MADE NEW ENTRIES SOMEHOW???!
+                return ENOMEM;
+            }
+
+            old_entry = next;
+        }
+
+
+
         curr = curr->as_next;
     }
 
@@ -154,6 +177,17 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
             return 0; //fix this error code
         }
 
+        size_t npages;
+
+        /* Align the region. First, the base... */
+        memsize += vaddr & ~(vaddr_t)PAGE_FRAME;
+        vaddr &= PAGE_FRAME;
+
+        /* ...and now the length. */
+        memsize = (memsize + PAGE_SIZE - 1) & PAGE_FRAME;
+
+        npages = memsize / PAGE_SIZE;
+
         struct region_spec *region = kmalloc(sizeof(struct region_spec));
         if(region==NULL){
             return ENOMEM;
@@ -164,7 +198,7 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
         if(executable) region->as_perms |= PF_X;
 
         region->as_vbase = vaddr;
-        region->as_regsize = memsize;
+        region->as_npages = npages;
         region->as_next = as->regions;
         as->regions = region;
 
@@ -187,49 +221,70 @@ as_prepare_load(struct addrspace *as)
         return 0;
 }
 
+
+/*
+- Re-set the permissions in the addrspace struct to what they were before
+
+- Go through the page table and unset the (D)irty bits on the page table entries for any pages that were loaded into (now) read-only regions
+
+- You also need to remove these pages from the TLB (you can just flush the whole TLB).
+*/
 int
 as_complete_load(struct addrspace *as)
 {
     struct region_spec *curr = as->regions;
-    //set all regions as read write -> temp until extended assignment
     while(curr!=NULL){
+        /* remove modified and writeable flags from modified regions */
         if(curr->as_perms & OS_M){
-            //remove modified and writeable flags
             curr->as_perms &= ~(PF_W | OS_M );
+
+            // https://piazza.com/class/jdwg14qxhhb4kp?cid=536
+
+            /* Look up page frames in this region*/
+            vaddr_t faultframe = curr->as_vbase & PAGE_FRAME;
+            uint32_t index = hpt_hash(as, faultframe);
+            struct pagetable_entry *hpt_entry = &(pagetable[index]);
+
+            /* Set all entries dirty bit to read only */
+            while(hpt_entry!=NULL){
+                hpt_entry->entrylo.lo.dirty = 0;
+                hpt_entry = hpt_entry->next;
+            }
+
         }
         curr = curr->as_next;
     }
+
+    /* Flush TLB */
+    as_activate();
+
     return 0;
 }
+
+
 
 int
 as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 {
-    size_t stacksize = FIXED_STACK_SIZE * PAGE_SIZE;
-    vaddr_t stackbase = USERSTACK - stacksize;
-    int result = as_define_region(as, stackbase, stacksize, VALID_BIT, VALID_BIT, INVALID_BIT);
+    vaddr_t stackbase = USERSTACK - STACKSIZE;
 
+    int result = as_define_region(as, stackbase, STACKSIZE, VALID_BIT, VALID_BIT, INVALID_BIT);
     if(result){
         return result;
     }
-
-    // if(as->regions->as_perms & PF_R){
-    //     kprintf("read flag not same\n");
-    //     panic(" read flag not same\n");
-    // }
-    // if(as->regions->as_perms & PF_W){
-    //     kprintf("write flag not same\n");
-    //     panic("write flag not same\n ");
-    // }
-    // if(as->regions->as_perms & PF_X){
-    //     kprintf("execute flag not same\n");
-    //     panic("execute flag not same\n ");
-    // }
-
-
 
     /* Initial user-level stack pointer */
     *stackptr = USERSTACK;
 
     return 0;
+}
+
+
+uint32_t
+hpt_hash(struct addrspace *as, vaddr_t faultaddr)
+{
+        uint32_t pagenumber;
+
+        pagenumber = (((uint32_t )as) ^ (faultaddr >> PAGE_BITS)) % pagespace;
+        return pagenumber;
 }

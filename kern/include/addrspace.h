@@ -48,14 +48,14 @@ struct vnode;
  * You write this.
  */
 
- #define FIXED_STACK_SIZE 16
+ #define STACKPAGES 16
+ #define STACKSIZE (STACKPAGES*PAGE_SIZE)
 
 
 struct region_spec{
     uint32_t as_perms;
      vaddr_t as_vbase;
-     vaddr_t as_pbase;
-     size_t as_regsize;
+     size_t as_npages;
      struct region_spec *as_next;
 };
 
@@ -121,14 +121,14 @@ void              as_deactivate(void);
 void              as_destroy(struct addrspace *);
 
 int               as_define_region(struct addrspace *as,
-                                   vaddr_t vaddr, size_t sz,
+                                   vaddr_t vaddr, size_t npages,
                                    int readable,
                                    int writeable,
                                    int executable);
 int               as_prepare_load(struct addrspace *as);
 int               as_complete_load(struct addrspace *as);
 int               as_define_stack(struct addrspace *as, vaddr_t *initstackptr);
-
+uint32_t      hpt_hash(struct addrspace *as, vaddr_t faultaddr);
 
 /*
  * Functions in loadelf.c
@@ -138,6 +138,9 @@ int               as_define_stack(struct addrspace *as, vaddr_t *initstackptr);
  */
 
 int load_elf(struct vnode *v, vaddr_t *entrypoint);
+
+/* Insert pagetable entries */
+struct pagetable_entry * insert_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber, uint32_t *hi);
 
 
 #endif /* _ADDRSPACE_H_ */

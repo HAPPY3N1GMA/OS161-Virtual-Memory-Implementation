@@ -14,19 +14,12 @@
 
 
 
-static uint32_t hpt_hash(struct addrspace *as, vaddr_t faultaddr);
-static void set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum);
-static void set_entryhi (struct EntryHi *entryhi, uint32_t pagenumber);
+
 
 /* Place your page table functions here */
 
 struct frametable_entry *firstfreeframe = 0;
 struct pagetable_entry *pagetable = 0;
-
-
-int pagespace;
-int framespace;
-
 
 
 ////////////////////////////////////
@@ -151,13 +144,6 @@ void vm_bootstrap(void)
 int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
-        //DO NOT PRINTF HERE
-
-        //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
-    	vaddr_t faultframe = faultaddress & PAGE_FRAME;
-
-    	DEBUG(DB_VM, "dumbvm: fault: 0x%x\n", faultframe);
-
     	switch (faulttype) {
     	    case VM_FAULT_READONLY:
                 return EFAULT;
@@ -168,108 +154,80 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     		      return EINVAL;
     	}
 
+        /* No process. This is probably a kernel fault early in boot process*/
         if (curproc == NULL) {
-    		/*
-    		 * No process. This is probably a kernel fault early
-    		 * in boot. Return EFAULT so as to panic instead of
-    		 * getting into an infinite faulting loop.
-    		 */
-    		return EFAULT;
+    	       return EFAULT;
     	}
 
-        //only reads are here!!!!!!!!!!!!!!!!!
-
-        //get our pagetable pagenumber
         struct addrspace *as = proc_getas();
+        /* No address space set up. */
         if (as == NULL) {
-    		/*
-    		 * No address space set up. This is probably also a
-    		 * kernel fault early in boot.
-    		 */
     		return EFAULT;
     	}
-
-	    /* Disable interrupts on this CPU while frobbing the TLB. */
-        int spl = splhigh();
 
         /* Look up page table Hashed index. */
+        vaddr_t faultframe = faultaddress & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
         uint32_t index = hpt_hash(as, faultframe);
         uint32_t pagenumber = faultaddress/PAGE_SIZE;
 
         struct pagetable_entry *hpt_entry = &(pagetable[index]);
+        int spl;
+        uint32_t entryhi, entrylo;
+        entryhi = entrylo = 0;
 
         /* Look up in page table to see if there is a VALID translation. */
         while(hpt_entry!=NULL){
             // if there is, load it into the TLB
             if(hpt_entry->pid == as && hpt_entry->entrylo.lo.valid){
-                entry_t entryhi;
-                set_entryhi(&(entryhi.hi),pagenumber);
-                tlb_random(entryhi.uint,hpt_entry->entrylo.uint);
-                splx(spl);
-                return 0;
+                entry_t ehi;
+                set_entryhi(&(ehi.hi),pagenumber);
+                entryhi = ehi.uint;
+                entrylo = hpt_entry->entrylo.uint;
+                break;
             }
             hpt_entry = hpt_entry->next;
         }
 
         /* No PageTable Entry Found -> read in a new page */
+        if(hpt_entry==NULL){
 
-        //serach trhough faultaddress
-        struct region_spec *currregion = as->regions;
-        hpt_entry = &(pagetable[index]);
+            struct region_spec *currregion = as->regions;
+            hpt_entry = &(pagetable[index]);
 
-        while(currregion != NULL){
-            //check if its a valid region
-            if(faultaddress >= currregion->as_vbase &&
-                 faultaddress < (currregion->as_vbase + currregion->as_regsize)){
+            while(currregion != NULL){
 
-                //allocate a new frame
-                vaddr_t kvaddr = alloc_kpages(1);
-
-                //we are externally chaining a new page table entry
-                if(hpt_entry!=NULL){
-                    struct pagetable_entry *new = kmalloc(sizeof(struct pagetable_entry));
-                    if(new==NULL){
-                        return 0; //TODO THIS NEEDS AN ERROR
-                    }
-                    new->next = hpt_entry->next;
-                    hpt_entry->next = new;
-                    hpt_entry = new;
+                /* check faultaddr is a valid region */
+                if(faultaddress >= currregion->as_vbase &&
+                     faultaddress < (currregion->as_vbase + (currregion->as_npages*PAGE_SIZE))){
+                         hpt_entry = insert_entry(as, hpt_entry, currregion, pagenumber, &entryhi);
+                         if(hpt_entry==NULL){
+                             return ENOMEM;
+                         }
+                          /* get the entrylo and entrylo for TLB Write */
+                         entrylo = hpt_entry->entrylo.uint;
+                    break;
                 }
-
-                //we update the pagetable entry
-                hpt_entry->pid = as;
-                hpt_entry->pagenumber = pagenumber;
-
-                //set the entrylo
-                paddr_t paddr = KVADDR_TO_PADDR(kvaddr);
-
-                uint32_t framenum = paddr >> 12;//faultaddress - currregion->as_vbase) + currregion->as_pbase;
-                int dirtybit = 0;
-
-                if( currregion->as_perms & PF_W){
-                    dirtybit = 1;
-                }
-
-                set_entrylo (&(hpt_entry->entrylo.lo), VALID_BIT, dirtybit, framenum);
-
-                hpt_entry->next = NULL;
-
-                //insert into tlb
-                entry_t entryhi;
-                set_entryhi(&(entryhi.hi),pagenumber);
-
-                tlb_random(entryhi.uint,hpt_entry->entrylo.uint);
-
-                splx(spl);
-                return 0;
+                currregion = currregion->as_next;
             }
-            currregion = currregion->as_next;
+
+            if(currregion==NULL){
+                panic("vm: faultaddress not in any valid region: %d\n",faultaddress);
+                return EFAULT;
+            }
+
         }
 
+        if(entryhi==0 || entrylo == 0){
+            panic("Serious error here...");
+            return EFAULT;
+        }
+
+        /* Write to the TLB */
+        spl = splhigh();
+        tlb_random(entryhi,entrylo);
         splx(spl);
 
-        panic("vm: faultaddress not in any valid region: %d\n",faultaddress);
-    	return EFAULT;
+        return 0;
 }
 
 /*
@@ -285,17 +243,7 @@ vm_tlbshootdown(const struct tlbshootdown *ts)
 }
 
 
-static uint32_t
-hpt_hash(struct addrspace *as, vaddr_t faultaddr)
-{
-        uint32_t pagenumber;
-
-        pagenumber = (((uint32_t )as) ^ (faultaddr >> PAGE_BITS)) % pagespace;
-        return pagenumber;
-}
-
-
-static void
+void
 set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum){
     entrylo->unused = 0;
     entrylo->global = 0; //always true for this assignment
@@ -305,7 +253,7 @@ set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum){
     entrylo->framenum = framenum;
 }
 
-static void
+void
 set_entryhi (struct EntryHi *entryhi, uint32_t pagenumber){
     entryhi->pid = 0; //not used for this assignment
     entryhi->pagenum = pagenumber;
