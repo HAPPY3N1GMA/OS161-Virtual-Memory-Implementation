@@ -144,16 +144,8 @@ free_kpages(vaddr_t addr)
 
 struct pagetable_entry *
 find_entry(struct addrspace *as, vaddr_t vaddr){
-    vaddr_t frame = vaddr & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
-    uint32_t index = hpt_hash(as, frame);
-    struct pagetable_entry *hpt_entry = &(pagetable[index]);
-    /* Look up in page table to see if there is a VALID translation. */
-    while(hpt_entry!=NULL){
-        if(hpt_entry->pid == as && hpt_entry->entrylo.lo.valid){
-            break;
-        }
-        hpt_entry = hpt_entry->next;
-    }
+    struct pagetable_entry *hpt_entry = NULL;
+    find_entry_parent(as, vaddr, hpt_entry);
     return hpt_entry;
 }
 
