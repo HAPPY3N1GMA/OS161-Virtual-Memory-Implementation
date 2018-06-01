@@ -185,6 +185,8 @@ as_destroy(struct addrspace *as)
                 curr_page = next_page;
         }
 
+        /* Flush TLB */
+        as_activate();
     }
 
     /* free all regions */
