@@ -117,7 +117,7 @@ free_kpages(vaddr_t addr)
 
         //lock access to pagetable!
         struct pagetable_entry *hpt_entry = NULL;
-        struct pagetable_entry *prev = find_entry_parent(as, addr, hpt_entry);
+        struct pagetable_entry *prev = find_entry_parent(as, addr, &hpt_entry);
         if(hpt_entry!=NULL){
             /* relink pagetable */
             if(prev != NULL){
@@ -142,28 +142,32 @@ free_kpages(vaddr_t addr)
 }
 
 
+
 struct pagetable_entry *
 find_entry(struct addrspace *as, vaddr_t vaddr){
     struct pagetable_entry *hpt_entry = NULL;
-    find_entry_parent(as, vaddr, hpt_entry);
+    find_entry_parent(as, vaddr, &hpt_entry);
     return hpt_entry;
 }
 
+
+
 /* returns parent and target hpt entries */
 struct pagetable_entry *
-find_entry_parent(struct addrspace *as, vaddr_t vaddr, struct pagetable_entry *hpt_entry){
+find_entry_parent(struct addrspace *as, vaddr_t vaddr, struct pagetable_entry **hpt_entry){
     vaddr_t frame = vaddr & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
     uint32_t index = hpt_hash(as, frame);
-    hpt_entry = &(pagetable[index]);
+    struct pagetable_entry *entry = &(pagetable[index]);
     struct pagetable_entry *parent = NULL;
     /* Look up in page table to see if there is a VALID translation. */
-    while(hpt_entry!=NULL){
-        if(hpt_entry->pid == as && hpt_entry->entrylo.lo.valid){
+    while(entry!=NULL){
+        if(entry->pid == as && entry->entrylo.lo.valid){
             break;
         }
-        parent = hpt_entry;
-        hpt_entry = hpt_entry->next;
+        parent = entry;
+        entry = entry->next;
     }
+    *hpt_entry = entry;
     return parent;
 }
 
