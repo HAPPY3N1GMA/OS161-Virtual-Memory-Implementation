@@ -95,7 +95,7 @@ as_zero_region(paddr_t paddr, unsigned npages)
 
 
 
-//ummm is this right? because we have a virtual system now... and when we free we free not at just an index, but we may want an actual page???
+//ummm is this right? because we have a virtual system now...
 void
 free_kpages(vaddr_t addr)
 {
@@ -105,10 +105,15 @@ free_kpages(vaddr_t addr)
 
         int index = paddr >> PADDR_TO_FRAME;
 
-        if(DEBUGMSG){
-            kprintf("index: %d\n",index);
-        };
 
+        /* VM System not Initialised */
+        if (frametable == 0) {
+            // Do nothing -> Leak the memory
+            return;
+        } else {
+        /* VM System Initialised */
+
+        //find the page
 
         spinlock_acquire(&stealmem_lock);
         frametable[index].next_free = firstfreeframe;
@@ -119,6 +124,24 @@ free_kpages(vaddr_t addr)
         if(firstfreeframe == 0){
             kprintf("ERROR THIS SHOULD NEVER HAPPEN!!!! free mem firstfreeframe was set to zero\n");
         }
+
+    }
+}
+
+
+struct pagetable_entry *
+find_entry(struct addrspace *as, vaddr_t vaddr){
+    vaddr_t frame = vaddr & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
+    uint32_t index = hpt_hash(as, frame);
+    struct pagetable_entry *hpt_entry = &(pagetable[index]);
+    /* Look up in page table to see if there is a VALID translation. */
+    while(hpt_entry!=NULL){
+        if(hpt_entry->pid == as && hpt_entry->entrylo.lo.valid){
+            break;
+        }
+        hpt_entry = hpt_entry->next;
+    }
+    return hpt_entry;
 }
 
 

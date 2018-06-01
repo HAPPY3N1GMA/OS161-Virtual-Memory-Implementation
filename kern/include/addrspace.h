@@ -140,6 +140,7 @@ uint32_t      hpt_hash(struct addrspace *as, vaddr_t faultaddr);
 int load_elf(struct vnode *v, vaddr_t *entrypoint);
 
 /* Insert pagetable entries */
+struct pagetable_entry * find_entry(struct addrspace *as, vaddr_t vaddr);
 struct pagetable_entry * insert_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber, uint32_t *hi);
 
 

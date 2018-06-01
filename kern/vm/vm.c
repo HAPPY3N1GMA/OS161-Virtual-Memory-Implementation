@@ -170,27 +170,18 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         uint32_t index = hpt_hash(as, faultframe);
         uint32_t pagenumber = faultaddress/PAGE_SIZE;
 
-        struct pagetable_entry *hpt_entry = &(pagetable[index]);
-        int spl;
         uint32_t entryhi, entrylo;
         entryhi = entrylo = 0;
 
-        /* Look up in page table to see if there is a VALID translation. */
-        while(hpt_entry!=NULL){
-            // if there is, load it into the TLB
-            if(hpt_entry->pid == as && hpt_entry->entrylo.lo.valid){
-                entry_t ehi;
-                set_entryhi(&(ehi.hi),pagenumber);
-                entryhi = ehi.uint;
-                entrylo = hpt_entry->entrylo.uint;
-                break;
-            }
-            hpt_entry = hpt_entry->next;
-        }
-
-        /* No PageTable Entry Found -> read in a new page */
-        if(hpt_entry==NULL){
-
+        /* Look up in page table for VALID translation and load into TLB. */
+        struct pagetable_entry *hpt_entry = find_entry(as, faultaddress);
+        if(hpt_entry!=NULL){
+            entry_t ehi;
+            set_entryhi(&(ehi.hi),pagenumber);
+            entryhi = ehi.uint;
+            entrylo = hpt_entry->entrylo.uint;
+        }else{
+            /* No PageTable Entry Found -> read in a new page */
             struct region_spec *currregion = as->regions;
             hpt_entry = &(pagetable[index]);
 
@@ -199,11 +190,11 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                 /* check faultaddr is a valid region */
                 if(faultaddress >= currregion->as_vbase &&
                      faultaddress < (currregion->as_vbase + (currregion->as_npages*PAGE_SIZE))){
+                         /* insert new page table entry */
                          hpt_entry = insert_entry(as, hpt_entry, currregion, pagenumber, &entryhi);
                          if(hpt_entry==NULL){
                              return ENOMEM;
                          }
-                          /* get the entrylo and entrylo for TLB Write */
                          entrylo = hpt_entry->entrylo.uint;
                     break;
                 }
@@ -223,7 +214,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         }
 
         /* Write to the TLB */
-        spl = splhigh();
+        int spl = splhigh();
         tlb_random(entryhi,entrylo);
         splx(spl);
 
