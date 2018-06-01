@@ -104,6 +104,7 @@ typedef union {
     uint32_t uint;
 } entry_t;
 
+/* Hashed Page Table */
 struct pagetable_entry{
     struct addrspace *pid;
     uint32_t pagenumber;

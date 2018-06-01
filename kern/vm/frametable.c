@@ -5,7 +5,7 @@
 #include <addrspace.h>
 #include <vm.h>
 #include <elf.h>
-
+#include <proc.h>
 
 /* Place your frametable data-structures here
  * You probably also want to write a frametable initialisation
@@ -99,21 +99,34 @@ as_zero_region(paddr_t paddr, unsigned npages)
 void
 free_kpages(vaddr_t addr)
 {
-        paddr_t paddr = KVADDR_TO_PADDR(addr);
-
-        KASSERT(paddr != 0);
-
-        int index = paddr >> PADDR_TO_FRAME;
-
-
         /* VM System not Initialised */
         if (frametable == 0) {
             // Do nothing -> Leak the memory
             return;
         } else {
         /* VM System Initialised */
+        paddr_t paddr = KVADDR_TO_PADDR(addr);
+        if(paddr == 0){
+            return;
+        }
 
-        //find the page
+        int index = paddr >> PADDR_TO_FRAME;
+
+        //find the pagetable entry
+        struct addrspace *as = proc_getas();
+
+        //lock access to pagetable!
+        struct pagetable_entry *hpt_entry = NULL;
+        struct pagetable_entry *prev = find_entry_parent(as, addr, hpt_entry);
+        if(hpt_entry!=NULL){
+            /* relink pagetable */
+            if(prev != NULL){
+                prev->next = hpt_entry->next;
+            }
+            /* free pagetable entry */
+            kfree(hpt_entry);
+            //unlock access to pagetable
+        }
 
         spinlock_acquire(&stealmem_lock);
         frametable[index].next_free = firstfreeframe;
@@ -142,6 +155,24 @@ find_entry(struct addrspace *as, vaddr_t vaddr){
         hpt_entry = hpt_entry->next;
     }
     return hpt_entry;
+}
+
+/* returns parent and target hpt entries */
+struct pagetable_entry *
+find_entry_parent(struct addrspace *as, vaddr_t vaddr, struct pagetable_entry *hpt_entry){
+    vaddr_t frame = vaddr & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
+    uint32_t index = hpt_hash(as, frame);
+    hpt_entry = &(pagetable[index]);
+    struct pagetable_entry *parent = NULL;
+    /* Look up in page table to see if there is a VALID translation. */
+    while(hpt_entry!=NULL){
+        if(hpt_entry->pid == as && hpt_entry->entrylo.lo.valid){
+            break;
+        }
+        parent = hpt_entry;
+        hpt_entry = hpt_entry->next;
+    }
+    return parent;
 }
 
 

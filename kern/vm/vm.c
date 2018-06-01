@@ -166,8 +166,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
     	}
 
         /* Look up page table Hashed index. */
-        vaddr_t faultframe = faultaddress & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
-        uint32_t index = hpt_hash(as, faultframe);
         uint32_t pagenumber = faultaddress/PAGE_SIZE;
 
         uint32_t entryhi, entrylo;
@@ -182,9 +180,11 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             entrylo = hpt_entry->entrylo.uint;
         }else{
             /* No PageTable Entry Found -> read in a new page */
-            struct region_spec *currregion = as->regions;
+            vaddr_t faultframe = faultaddress & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
+            uint32_t index = hpt_hash(as, faultframe);
             hpt_entry = &(pagetable[index]);
 
+            struct region_spec *currregion = as->regions;
             while(currregion != NULL){
 
                 /* check faultaddr is a valid region */
