@@ -184,9 +184,6 @@ as_destroy(struct addrspace *as)
                 }
                 curr_page = next_page;
         }
-
-        /* Flush TLB */
-        as_activate();
     }
 
     /* free all regions */
@@ -199,6 +196,10 @@ as_destroy(struct addrspace *as)
     }
 
     kfree(as);
+
+    /* Flush TLB */
+    as_activate();
+
 }
 
 void
