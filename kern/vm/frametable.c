@@ -52,6 +52,11 @@ alloc_kpages(unsigned int npages)
               return 0;
             }
 
+
+            if( firstfreeframe->used == FRAME_USED){
+                panic("WE ARE ALREADY USED!\n");
+            }
+
           spinlock_acquire(&frametable_lock);
 
           paddr = firstfreeframe - frametable;
@@ -69,6 +74,9 @@ alloc_kpages(unsigned int npages)
             return 0;
         }
 
+        /* make sure it's page-aligned */
+    	KASSERT((paddr & PAGE_FRAME) == paddr);
+
         //zero fill the page
         as_zero_region(paddr, npages);
 
@@ -79,12 +87,6 @@ static
 void
 as_zero_region(paddr_t paddr, unsigned npages)
 {
-//     (void)paddr;
-//     (void)npages;
-//
-// //    kprintf("npages: %d paddr: %x translated: %x\n",npages,paddr,PADDR_TO_KVADDR(paddr));
-//
-//     return;
 	bzero((void *)PADDR_TO_KVADDR(paddr), npages * PAGE_SIZE);
 }
 

@@ -270,6 +270,7 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
         if(executable) region->as_perms |= PF_X;
 
         region->as_vbase = vaddr;
+        region->as_pbase = KVADDR_TO_PADDR(vaddr);
         region->as_npages = npages;
         region->as_next = as->regions;
         as->regions = region;
@@ -357,6 +358,6 @@ hpt_hash(struct addrspace *as, vaddr_t faultaddr)
 {
         uint32_t pagenumber;
 
-        pagenumber = (((uint32_t )as) ^ (faultaddr >> PAGE_BITS)) % pagespace;
+        pagenumber = (((uint32_t )as) ^ (faultaddr >> PAGE_BITS)) % (pagespace/sizeof(struct pagetable_entry));
         return pagenumber;
 }

@@ -183,7 +183,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             }
 
             if(currregion==NULL){
-                //panic("vm: faultaddress not in any valid region: %d | 0x%x\n",faultaddress,faultaddress);
+                panic("vm: faultaddress not in any valid region: %d | 0x%x\nfaultframe: %x hpt index: %d\n",faultaddress,faultaddress,faultframe,index);
                 spinlock_release(&pagetable_lock);
                 return EFAULT;
             }
