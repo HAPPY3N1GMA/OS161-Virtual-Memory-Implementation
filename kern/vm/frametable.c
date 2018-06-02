@@ -81,6 +81,7 @@ alloc_kpages(unsigned int npages)
     	    paddr = ram_stealmem(npages);
     	    spinlock_release(&stealmem_lock);
         } else {
+
             /* VM System Initialised */
              if(firstfreeframe == 0){
                  spinlock_release(&frametable_lock);
@@ -88,13 +89,11 @@ alloc_kpages(unsigned int npages)
              }
 
              if( firstfreeframe->used == FRAME_USED){
-                 panic("WE ARE ALREADY USED!\n");
                  return 0;
              }
 
             /* only allocate 1 page at a time */
             if (npages != 1) {
-                panic("ALLOCATE %d pages\n",npages);
                 spinlock_release(&frametable_lock);
                 return 0;
             }
@@ -109,7 +108,6 @@ alloc_kpages(unsigned int npages)
         spinlock_release(&frametable_lock);
 
         if(paddr == 0){
-            kprintf("IT WAS ZERO! index = %d\n(firstfreeframe - frametable) = %d\nsizeof(struct frametable_entry) = %d\n",(int)paddr,(firstfreeframe - frametable),sizeof(struct frametable_entry));
             return 0;
         }
 
@@ -121,8 +119,6 @@ alloc_kpages(unsigned int npages)
 
         return PADDR_TO_KVADDR(paddr);
 }
-
-
 
 
 void
@@ -148,68 +144,5 @@ free_kpages(vaddr_t addr)
         frametable[frame_index].used = FRAME_UNUSED;
         firstfreeframe = &(frametable[frame_index]);
         spinlock_release(&frametable_lock);
-
-        /* free the pagetable entry */
-        // struct addrspace *as =proc_getas();
-        // vaddr_t faultframe = addr & PAGE_FRAME;
-        // int page_index = hpt_hash(as,faultframe);
-        // spinlock_acquire(&pagetable_lock);
-        // pagetable[page_index] =  destroy_page(as,pagetable[page_index]);
-        // spinlock_release(&pagetable_lock);
-
     }
 }
-
-//
-// struct pagetable_entry *
-// insert_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber, uint32_t *hi){
-//
-//     /* externally chaining the new page table entry */
-//     if(hpt_entry==NULL){
-//         panic("THIS SHOULD NOT BE NULL\n");
-//     }
-//
-//     /* assign a page frame */
-//     if(hpt_entry->pid!=NULL){
-//
-//         /* initialise a chained entry in the pageframe */
-//         struct pagetable_entry *new = kmalloc(sizeof(struct pagetable_entry));
-//         if(new==NULL){
-//             return NULL;
-//         }
-//         init_entry(as, new, region, pagenumber);
-//         new->next = hpt_entry->next;
-//         hpt_entry->next = new;
-//         hpt_entry = new;
-//     }else{
-//         /* initialise the first entry in the pageframe */
-//         init_entry(as, hpt_entry, region, pagenumber);
-//     }
-//
-//     /* set the entryhi */
-//     entry_t ehi;
-//     set_entryhi(&(ehi.hi),pagenumber);
-//     *hi = ehi.uint;
-//
-//     return hpt_entry;
-// }
-//
-//
-//
-// void
-// init_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber){
-//         //we update the pagetable entry
-//         hpt_entry->pid = as;
-//         hpt_entry->pagenumber = pagenumber;
-//         hpt_entry->next = NULL;
-//
-//         //allocate a new frame
-//         vaddr_t kvaddr = alloc_kpages(1);
-//
-//         /* set the entrylo */
-//         paddr_t paddr = KVADDR_TO_PADDR(kvaddr);
-//         uint32_t framenum = paddr >> PADDR_TO_FRAME;//faultaddress - region->as_vbase) + region->as_pbase;
-//         int dirtybit = 0;
-//         if(region->as_perms & PF_W) dirtybit = 1;
-//         set_entrylo (&(hpt_entry->entrylo.lo), VALID_BIT, dirtybit, framenum);
-// }

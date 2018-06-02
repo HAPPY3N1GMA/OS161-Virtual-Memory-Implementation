@@ -91,13 +91,13 @@ triple(const char *prog)
 	args[0]=(char *)prog;
 	args[1]=NULL;
 
-	warnx("Starting: running two copies of %s...", prog);
-//temp changes
-	for (i=0; i<2; i++) {
+	warnx("Starting: running three copies of %s...", prog);
+
+	for (i=0; i<3; i++) {
 		pids[i]=spawnv(args[0], args);
 	}
-//temp change
-	for (i=0; i<2; i++) {
+
+	for (i=0; i<3; i++) {
 		failures += dowait(i, pids[i]);
 	}
 
