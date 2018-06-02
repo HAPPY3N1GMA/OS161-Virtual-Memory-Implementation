@@ -10,19 +10,18 @@
 #include <elf.h>
 #include <spl.h>
 
-//temp
 
-
-
-
-
-/* Place your page table functions here */
 
 struct frametable_entry *firstfreeframe = 0;
 struct pagetable_entry **pagetable = NULL;
 
-
 struct spinlock pagetable_lock = SPINLOCK_INITIALIZER;
+
+
+/* Page table functions */
+
+
+static struct pagetable_entry *find_page(struct addrspace *as, uint32_t index);
 
 
 void vm_bootstrap(void)
@@ -44,29 +43,12 @@ void vm_bootstrap(void)
 
 
 
-struct region_spec *check_valid_address(struct addrspace *as, vaddr_t addr);
 
-
-struct region_spec *
-check_valid_address(struct addrspace *as, vaddr_t addr){
-    struct region_spec *currregion = as->regions;
-    while(currregion != NULL){
-        /* check addr is a valid region */
-        if(addr >= currregion->as_vbase &&
-             addr < (currregion->as_vbase + (currregion->as_npages*PAGE_SIZE))){
-             return currregion;
-        }
-        currregion = currregion->as_next;
-    }
-    return NULL;
-}
-
-
-
-struct pagetable_entry *find_page(struct addrspace *as, uint32_t index);
-
-/* Look up in page table to see if there is a VALID translation. */
-struct pagetable_entry *
+/*
+    find_page
+    Look up in page table to see if there is a VALID translation.
+*/
+static struct pagetable_entry *
 find_page(struct addrspace *as, uint32_t index){
 struct pagetable_entry *curr_entry = pagetable[index];
 while(curr_entry!=NULL){

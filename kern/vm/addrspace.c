@@ -46,6 +46,28 @@ struct pagetable_entry *destroy_page(struct addrspace *as,struct pagetable_entry
 
 
 
+
+/*
+    check_valid_address
+    Checks a given address against an address space regions.
+    If valid region found, returns the region.
+*/
+struct region_spec *
+check_valid_address(struct addrspace *as, vaddr_t addr){
+    struct region_spec *currregion = as->regions;
+    while(currregion != NULL){
+        /* check addr is a valid region */
+        if(addr >= currregion->as_vbase &&
+             addr < (currregion->as_vbase + (currregion->as_npages*PAGE_SIZE))){
+             return currregion;
+        }
+        currregion = currregion->as_next;
+    }
+    return NULL;
+}
+
+
+
 /*
  * Note! If OPT_DUMBVM is set, as is the case until you start the VM
  * assignment, this file is not compiled or linked or in any way
