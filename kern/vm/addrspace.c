@@ -101,9 +101,11 @@ as_copy(struct addrspace *old, struct addrspace **ret)
         vaddr_t faultaddr = curr_region->as_vbase & PAGE_FRAME;
 
         uint32_t old_index = hpt_hash(old, faultaddr);
+        uint32_t new_index = hpt_hash(new, faultaddr);
 
         struct pagetable_entry *curr_hpt = &(pagetable[old_index]);
-        struct pagetable_entry *prev_hpt = NULL;
+
+        struct pagetable_entry *new_hpt = &(pagetable[new_index]);
 
 
         struct pagetable_entry *new_chain = NULL;
@@ -118,7 +120,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
                 }
 
                 /* initialise pagetable entry contents */
-                init_entry(new, new_entry, curr_region, curr_hpt->pagenumber);
+                init_entry(new, new_entry, new->regions, new_index);
 
                 /* link into new chain */
                 if(new_chain==NULL){
@@ -131,14 +133,23 @@ as_copy(struct addrspace *old, struct addrspace **ret)
                 /* copy frame contents */
                 copyframe(curr_hpt, new_entry);
             }
-
-            prev_hpt = curr_hpt;
             curr_hpt = curr_hpt->next;
         }
 
         /* link new chain onto end of existing chain */
-        if(prev_hpt != NULL){
-            prev_hpt->next = new_chain;
+        if(new_chain != NULL){
+            if(new_hpt->pid == 0){
+                memcpy(new_hpt,new_chain,sizeof(struct pagetable_entry));
+                kfree(new_chain);
+            }else{
+                //append to end of list
+                struct pagetable_entry *curr = new_hpt;
+                while(curr->next!=NULL){
+                    curr = curr->next;
+                }
+                panic("ATTACHING NEW CHAIN\n");
+                curr->next = new_chain;
+            }
         }
 
         curr_region = curr_region->as_next;
