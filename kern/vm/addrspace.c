@@ -41,6 +41,9 @@
 
 
 static void copyframe(struct pagetable_entry *from, struct pagetable_entry *to);
+struct pagetable_entry *destroy_page(struct addrspace *as,struct pagetable_entry *entry);
+
+
 
 
 /*
@@ -384,11 +387,27 @@ as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 }
 
 
-uint32_t
-hpt_hash(struct addrspace *as, vaddr_t faultaddr)
-{
-        uint32_t pagenumber;
 
-        pagenumber = (((uint32_t )as) ^ (faultaddr >> PAGE_BITS)) % (pagespace/sizeof(struct pagetable_entry));
-        return pagenumber;
-}
+
+
+
+
+
+
+
+ /* You must hold pagetable lock before calling this function */
+ struct pagetable_entry *
+ destroy_page(struct addrspace *as,struct pagetable_entry *entry){
+     if(entry==NULL){
+         return NULL;
+     }
+
+     if(entry->pid == as){
+         struct pagetable_entry *next = entry->next;
+         kfree(entry);
+         return next;
+     }
+
+     entry->next =destroy_page(as,entry->next);
+     return entry;
+ }

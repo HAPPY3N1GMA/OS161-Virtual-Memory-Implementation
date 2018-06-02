@@ -48,6 +48,7 @@
 
 /* Initialization function */
 void vm_bootstrap(void);
+void frametable_bootstrap(void);
 
 /* Fault handling function called by trap code */
 int vm_fault(int faulttype, vaddr_t faultaddress);
@@ -77,10 +78,8 @@ extern struct frametable_entry *firstfreeframe;
 #define FRAME_TO_PADDR PAGE_BITS
 #define PADDR_TO_FRAME FRAME_TO_PADDR
 
-struct frametable_entry{
-    char used;
-    struct frametable_entry *next_free;
-};
+
+
 
 struct EntryLo{
     unsigned int
@@ -113,10 +112,9 @@ struct pagetable_entry{
 };
 
 extern struct spinlock pagetable_lock;
-extern struct spinlock frametable_lock;
 
-void set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum);
-void set_entryhi (struct EntryHi *entryhi, uint32_t pagenumber);
-
+void          set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum);
+void          set_entryhi (struct EntryHi *entryhi, uint32_t pagenumber);
+uint32_t    hpt_hash(struct addrspace *as, vaddr_t faultaddr);
 
 #endif /* _VM_H_ */

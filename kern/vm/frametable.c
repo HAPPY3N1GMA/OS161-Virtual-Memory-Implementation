@@ -7,64 +7,108 @@
 #include <elf.h>
 #include <proc.h>
 
-/* Place your frametable data-structures here
- * You probably also want to write a frametable initialisation
- * function and call it from vm_bootstrap
- */
 
-static void as_zero_region(paddr_t paddr, unsigned npages);
+struct frametable_entry{
+    char used;
+    struct frametable_entry *next_free;
+};
 
-
-/* Note that this function returns a VIRTUAL address, not a physical
- * address
- * WARNING: this function gets called very early, before
- * vm_bootstrap().  You may wish to modify main.c to call your
- * frame table initialisation function, or check to see if the
- * frame table has been initialised and call ram_stealmem() otherwise.
- */
 
 struct frametable_entry *frametable = 0;
 
+struct spinlock frametable_lock = SPINLOCK_INITIALIZER;
+static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
+
+
+
+void frametable_bootstrap(void){
+
+    //calculate the ram size to get size of frametable
+    paddr_t ramtop = ram_getsize();
+
+    //reserve space for frametable
+    int nframes = (ramtop / PAGE_SIZE);
+    framespace = nframes * sizeof(struct frametable_entry);
+    struct frametable_entry *ft = kmalloc(framespace);
+    KASSERT(ft != NULL);
+    memset(ft, 0, framespace);
+
+    unsigned int i;
+
+    /* reset the base of available memory */
+    paddr_t freebase = ram_getfirstfree();
+    unsigned int bumpallocated = (freebase / PAGE_SIZE);
+
+    //set OS frames as used
+    for(i = 0; i < bumpallocated; i++){
+        ft[i].used = FRAME_USED;
+        ft[i].next_free = 0;
+    }
+
+    /* set free memory as available and build free list */
+    firstfreeframe = &(ft[i]);
+    unsigned int freeframes = ((ramtop - freebase)/PAGE_SIZE)-1;
+    for (; i <  freeframes;i++) {
+        ft[i].used = FRAME_UNUSED;
+        ft[i].next_free = &(ft[i+1]);
+    }
+
+    /* set last page to point to 0 */
+    ft[i].used = FRAME_UNUSED;
+    ft[i].next_free = 0;
+
+    frametable = ft;
+}
+
+
+
+ /* Note that this function returns a VIRTUAL address, not a physical
+  * address
+  * WARNING: this function gets called very early, before
+  * vm_bootstrap().  You may wish to modify main.c to call your
+  * frame table initialisation function, or check to see if the
+  * frame table has been initialised and call ram_stealmem() otherwise.
+  */
 vaddr_t
 alloc_kpages(unsigned int npages)
 {
-        paddr_t paddr;
+        paddr_t paddr = 0;
         spinlock_acquire(&frametable_lock);
+
         /* VM System not Initialised - Use Bump Allocator */
         if (frametable == 0) {
-            paddr = ram_stealmem(npages);
+            spinlock_acquire(&stealmem_lock);
+    	    paddr = ram_stealmem(npages);
+    	    spinlock_release(&stealmem_lock);
         } else {
-
             /* VM System Initialised */
-
-            //out of frames return 0
              if(firstfreeframe == 0){
                  spinlock_release(&frametable_lock);
                  return 0;
              }
 
-            //whilst debugging, have this assert to catch weird behaviour
-            KASSERT(npages == 1);
+             if( firstfreeframe->used == FRAME_USED){
+                 panic("WE ARE ALREADY USED!\n");
+                 return 0;
+             }
 
-            //only allowed to allocate 1 page at a time
+            /* only allocate 1 page at a time */
             if (npages != 1) {
+                panic("ALLOCATE %d pages\n",npages);
                 spinlock_release(&frametable_lock);
-              return 0;
+                return 0;
             }
 
-
-            if( firstfreeframe->used == FRAME_USED){
-                panic("WE ARE ALREADY USED!\n");
-            }
-
-          paddr = firstfreeframe - frametable;
-          paddr <<= FRAME_TO_PADDR;
-          firstfreeframe->used = FRAME_USED;
-          firstfreeframe = firstfreeframe->next_free;
+            /* Allocate frame entry */
+            paddr = firstfreeframe - frametable;
+            paddr <<= FRAME_TO_PADDR;
+            firstfreeframe->used = FRAME_USED;
+            firstfreeframe = firstfreeframe->next_free;
         }
 
+        spinlock_release(&frametable_lock);
+
         if(paddr == 0){
-            spinlock_release(&frametable_lock);
             kprintf("IT WAS ZERO! index = %d\n(firstfreeframe - frametable) = %d\nsizeof(struct frametable_entry) = %d\n",(int)paddr,(firstfreeframe - frametable),sizeof(struct frametable_entry));
             return 0;
         }
@@ -72,18 +116,10 @@ alloc_kpages(unsigned int npages)
         /* make sure it's page-aligned */
     	KASSERT((paddr & PAGE_FRAME) == paddr);
 
-        //zero fill the page
-        as_zero_region(paddr, npages);
+        /* zero fill the frame */
+         bzero((void *)PADDR_TO_KVADDR(paddr), PAGE_SIZE);
 
-        spinlock_release(&frametable_lock);
         return PADDR_TO_KVADDR(paddr);
-}
-
-static
-void
-as_zero_region(paddr_t paddr, unsigned npages)
-{
-	bzero((void *)PADDR_TO_KVADDR(paddr), npages * PAGE_SIZE);
 }
 
 
@@ -94,51 +130,32 @@ free_kpages(vaddr_t addr)
 {
         /* VM System not Initialised */
         if (frametable == 0) {
-            // Do nothing -> Leak the memory
             return;
         } else {
-
         /* VM System Initialised */
         paddr_t paddr = KVADDR_TO_PADDR(addr);
-        if(paddr == 0){
-            return;
-        }
+        if(paddr == 0) return;
 
-        int index = paddr >> PADDR_TO_FRAME;
+        /* free the frametable entry */
+        int frame_index = paddr >> PADDR_TO_FRAME;
 
-        //find the pagetable entry
-        struct addrspace *as = proc_getas();
-
-        struct pagetable_entry *hpt_entry = NULL;
-        spinlock_acquire(&pagetable_lock);
-        struct pagetable_entry *prev = find_entry_parent(as, addr, &hpt_entry);
-        if(hpt_entry!=NULL){
-            /* relink pagetable */
-            if(prev != NULL){
-                /* you are in the chain */
-                prev->next = hpt_entry->next;
-                kfree(hpt_entry);
-            }else{
-                /* you are the head of the chain */
-                if(hpt_entry->next){
-                    /* if chained entries exist*/
-                    memcpy(hpt_entry,hpt_entry->next,sizeof(struct pagetable_entry));
-                    kfree(hpt_entry->next);
-                }
-                memset(hpt_entry,0,sizeof(struct pagetable_entry));
-            }
-        }
-        spinlock_release(&pagetable_lock);
+     	if (frametable[frame_index].used != FRAME_USED) {
+     		return;
+     	}
 
         spinlock_acquire(&frametable_lock);
-        frametable[index].next_free = firstfreeframe;
-        frametable[index].used = FRAME_UNUSED;
-        firstfreeframe = &(frametable[index]);
+        frametable[frame_index].next_free = firstfreeframe;
+        frametable[frame_index].used = FRAME_UNUSED;
+        firstfreeframe = &(frametable[frame_index]);
         spinlock_release(&frametable_lock);
 
-        if(firstfreeframe == 0){
-            kprintf("ERROR THIS SHOULD NEVER HAPPEN!!!! free mem firstfreeframe was set to zero\n");
-        }
+        /* free the pagetable entry */
+        // struct addrspace *as =proc_getas();
+        // vaddr_t faultframe = addr & PAGE_FRAME;
+        // int page_index = hpt_hash(as,faultframe);
+        // spinlock_acquire(&pagetable_lock);
+        // pagetable[page_index] =  destroy_page(as,pagetable[page_index]);
+        // spinlock_release(&pagetable_lock);
 
     }
 }

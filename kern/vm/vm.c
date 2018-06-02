@@ -22,55 +22,23 @@ struct frametable_entry *firstfreeframe = 0;
 struct pagetable_entry **pagetable = NULL;
 
 
-
-struct spinlock frametable_lock = SPINLOCK_INITIALIZER;
 struct spinlock pagetable_lock = SPINLOCK_INITIALIZER;
 
 
 void vm_bootstrap(void)
 {
-        //calculate the ram size to get size of frametable
         paddr_t ramtop = ram_getsize();
-
-        //reserve space for frametable
         int nframes = (ramtop / PAGE_SIZE);
-        framespace = nframes * sizeof(struct frametable_entry);
-        struct frametable_entry *ft = kmalloc(framespace);
-        KASSERT(ft != NULL);
-        memset(ft, 0, framespace);
 
-        //reserve space for pagetable
+        /* reserve space for pagetable */
         int npages = (nframes * 2);
         pagespace = npages * sizeof(struct pagetable_entry *);
         pagetable = kmalloc(pagespace);
         KASSERT(pagetable != NULL);
         for(int i = 0; i<npages; i++) pagetable[i] = NULL;
 
-        //reset the base of available memory
-        paddr_t freebase = ram_getfirstfree();
-
-        unsigned int i;
-        unsigned int bumpallocated = (freebase / PAGE_SIZE);
-
-        //set OS frames as used
-        for(i = 0; i < bumpallocated; i++){
-            ft[i].used = FRAME_USED;
-            ft[i].next_free = 0;
-        }
-
-        //set free memory as available and build free list
-        firstfreeframe = &(ft[i]);
-        unsigned int freeframes = ((ramtop - freebase)/PAGE_SIZE)-1;
-        for (; i <  freeframes;i++) {
-            ft[i].used = FRAME_UNUSED;
-            ft[i].next_free = &(ft[i+1]);
-        }
-
-        //set last page to point to 0
-        ft[i].used = FRAME_UNUSED;
-        ft[i].next_free = 0;
-
-        frametable = ft;
+        /* initialise frametable */
+        frametable_bootstrap();
 }
 
 
@@ -275,4 +243,14 @@ void
 set_entryhi (struct EntryHi *entryhi, uint32_t pagenumber){
     entryhi->pid = 0; //not used for this assignment
     entryhi->pagenum = pagenumber;
+}
+
+
+uint32_t
+hpt_hash(struct addrspace *as, vaddr_t faultaddr)
+{
+        uint32_t pagenumber;
+
+        pagenumber = (((uint32_t )as) ^ (faultaddr >> PAGE_BITS)) % (pagespace/sizeof(struct pagetable_entry));
+        return pagenumber;
 }
