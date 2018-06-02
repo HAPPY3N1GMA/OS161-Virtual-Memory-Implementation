@@ -111,14 +111,18 @@ int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
 
+    spinlock_acquire(&pagetable_lock);
+
     /* No process. This is probably a kernel fault early in boot process*/
     if (curproc == NULL) {
+            spinlock_release(&pagetable_lock);
            return EFAULT;
     }
 
     struct addrspace *as = proc_getas();
     /* No address space set up. */
     if (as == NULL) {
+        spinlock_release(&pagetable_lock);
         return EFAULT;
     }
 
@@ -126,18 +130,22 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     	switch (faulttype) {
     	    case VM_FAULT_READONLY:
+                spinlock_release(&pagetable_lock);
                 return EFAULT;
     	    case VM_FAULT_READ:
                 if (~(currregion->as_perms) & PF_R) {
+                    spinlock_release(&pagetable_lock);
                     return EFAULT;
                 }
                 break;
     	    case VM_FAULT_WRITE:
                 if (~(currregion->as_perms) & PF_W) {
+                    spinlock_release(&pagetable_lock);
                     return EFAULT;
                 }
     		    break;
     	    default:
+                spinlock_release(&pagetable_lock);
     		      return EINVAL;
     	}
 
@@ -150,7 +158,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         /* Look up in page table for VALID translation and load into TLB. */
         struct pagetable_entry *curr_entry = find_entry(as, faultaddress);
 
-        spinlock_acquire(&pagetable_lock);
+
 
         if(curr_entry!=NULL){
             /* Found existing pagetable entry and existing frameentry*/
@@ -177,13 +185,16 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                              return ENOMEM;
                          }
                          entrylo = curr_entry->entrylo.uint;
+                         if(entrylo==0){
+                             panic("entrylo was zero\n");
+                         }
                     break;
                 }
                 currregion = currregion->as_next;
             }
 
             if(currregion==NULL){
-                panic("vm: faultaddress not in any valid region: %d | 0x%x\nfaultframe: %x hpt index: %d\n",faultaddress,faultaddress,faultframe,index);
+                //panic("vm: faultaddress not in any valid region: %d | 0x%x\nfaultframe: %x hpt index: %d\n",faultaddress,faultaddress,faultframe,index);
                 spinlock_release(&pagetable_lock);
                 return EFAULT;
             }
@@ -191,7 +202,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         }
 
         if(entryhi==0 || entrylo == 0){
-            panic("Serious error here...");
+            panic("Serious error here... entryhi: %d and entrylo: %d\n",entryhi,entrylo);
             spinlock_release(&pagetable_lock);
             return EFAULT;
         }

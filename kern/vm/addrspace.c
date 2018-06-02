@@ -97,18 +97,19 @@ as_copy(struct addrspace *old, struct addrspace **ret)
         //copyin new page frames --> advanced will share page frames instead
 
         /* Look up page frames in this region*/
-        vaddr_t curr_frame = curr_region->as_vbase & PAGE_FRAME;
-        uint32_t old_index = hpt_hash(old, curr_frame);
+        vaddr_t faultaddr = curr_region->as_vbase & PAGE_FRAME;
+
+        uint32_t old_index = hpt_hash(old, faultaddr);
+
         struct pagetable_entry *curr_hpt = &(pagetable[old_index]);
         struct pagetable_entry *prev_hpt = NULL;
 
 
         struct pagetable_entry *new_chain = NULL;
 
-        /* copy all relevant frames in this region*/
         while(curr_hpt!=NULL){
-            if(old==curr_hpt->pid){
-
+            /* copy all relevant frames in this region*/
+            if(old == curr_hpt->pid){
                 struct pagetable_entry *new_entry = kmalloc(sizeof(struct pagetable_entry));
                 if(new_entry==NULL){
                     //free allready newly chained entries
@@ -141,7 +142,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 
         curr_region = curr_region->as_next;
     }
-
+//panic("AS COPY WAS CALLED\n");
     *ret = new;
     return 0;
 }
@@ -154,10 +155,13 @@ static void
 copyframe(struct pagetable_entry *from, struct pagetable_entry *to){
     int from_frame = from->entrylo.lo.framenum;
     paddr_t from_paddr = from_frame<<FRAME_TO_PADDR;
+
     int to_frame = to->entrylo.lo.framenum;
     paddr_t to_paddr = to_frame<<FRAME_TO_PADDR;
+
     to_paddr = PADDR_TO_KVADDR(to_paddr);
     from_paddr = PADDR_TO_KVADDR(from_paddr);
+
     memcpy((void *)to_paddr,(void *)from_paddr,PAGE_SIZE);
 }
 

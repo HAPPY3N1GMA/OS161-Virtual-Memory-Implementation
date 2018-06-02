@@ -188,20 +188,19 @@ insert_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct reg
     }
 
     /* assign a page frame */
-
-    //are we updating the first entry
     if(hpt_entry->pid!=NULL){
 
+        /* initialise a chained entry in the pageframe */
         struct pagetable_entry *new = kmalloc(sizeof(struct pagetable_entry));
         if(new==NULL){
             return NULL;
         }
-
-        init_entry(as, hpt_entry, region, pagenumber);
+        init_entry(as, new, region, pagenumber);
         new->next = hpt_entry->next;
         hpt_entry->next = new;
         hpt_entry = new;
     }else{
+        /* initialise the first entry in the pageframe */
         init_entry(as, hpt_entry, region, pagenumber);
     }
 
@@ -212,6 +211,8 @@ insert_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct reg
 
     return hpt_entry;
 }
+
+
 
 void
 init_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber){
