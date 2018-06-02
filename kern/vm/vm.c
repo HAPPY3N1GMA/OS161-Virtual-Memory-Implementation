@@ -19,31 +19,13 @@
 /* Place your page table functions here */
 
 struct frametable_entry *firstfreeframe = 0;
-struct pagetable_entry *pagetable = 0;
+struct pagetable_entry **pagetable = NULL;
+
+
 
 struct spinlock frametable_lock = SPINLOCK_INITIALIZER;
 struct spinlock pagetable_lock = SPINLOCK_INITIALIZER;
 
-
-////////////////////////////////////
-#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
-#define BYTE_TO_BINARY(byte)  \
-  (byte & 0x80 ? '1' : '0'), \
-  (byte & 0x40 ? '1' : '0'), \
-  (byte & 0x20 ? '1' : '0'), \
-  (byte & 0x10 ? '1' : '0'), \
-  (byte & 0x08 ? '1' : '0'), \
-  (byte & 0x04 ? '1' : '0'), \
-  (byte & 0x02 ? '1' : '0'), \
-  (byte & 0x01 ? '1' : '0')
-//////////////////
-
-
-
-// #define TLBLO_PPAGE   0xfffff000
-// #define TLBLO_NOCACHE 0x00000800
-// #define TLBLO_DIRTY   0x00000400
-// #define TLBLO_VALID   0x00000200
 
 void vm_bootstrap(void)
 {
@@ -59,10 +41,10 @@ void vm_bootstrap(void)
 
         //reserve space for pagetable
         int npages = (nframes * 2);
-        pagespace = npages * sizeof(struct pagetable_entry);
+        pagespace = npages * sizeof(struct pagetable_entry *);
         pagetable = kmalloc(pagespace);
         KASSERT(pagetable != NULL);
-        memset(pagetable, 0, pagespace);
+        for(int i = 0; i<npages; i++) pagetable[i] = NULL;
 
         //reset the base of available memory
         paddr_t freebase = ram_getfirstfree();
@@ -70,7 +52,7 @@ void vm_bootstrap(void)
         unsigned int i;
         unsigned int bumpallocated = (freebase / PAGE_SIZE);
 
-        //set OS, pagetable and frametable frames as unavailable
+        //set OS frames as used
         for(i = 0; i < bumpallocated; i++){
             ft[i].used = FRAME_USED;
             ft[i].next_free = 0;
@@ -88,10 +70,104 @@ void vm_bootstrap(void)
         ft[i].used = FRAME_UNUSED;
         ft[i].next_free = 0;
 
-        //only set frametable to not be zero once all of bumpallocated and our vm is ready
         frametable = ft;
+}
+
+
+
+struct region_spec *check_valid_address(struct addrspace *as, vaddr_t addr);
+
+
+
+
+struct region_spec *
+check_valid_address(struct addrspace *as, vaddr_t addr){
+    struct region_spec *currregion = as->regions;
+    while(currregion != NULL){
+        /* check addr is a valid region */
+        if(addr >= currregion->as_vbase &&
+             addr < (currregion->as_vbase + (currregion->as_npages*PAGE_SIZE))){
+             return currregion;
+        }
+        currregion = currregion->as_next;
+    }
+    return NULL;
+}
+
+
+
+struct pagetable_entry *find_page(struct addrspace *as, uint32_t index);
+
+/* Look up in page table to see if there is a VALID translation. */
+struct pagetable_entry *
+find_page(struct addrspace *as, uint32_t index){
+struct pagetable_entry *curr_entry = pagetable[index];
+while(curr_entry!=NULL){
+    //check address space matches and valid bit
+    if(curr_entry->pid == as && curr_entry->entrylo.lo.valid){
+        break;
+    }
+    curr_entry = curr_entry->next;
+}
+return curr_entry;
+}
+
+
+
+
+
+
+void insert_page(uint32_t index,struct pagetable_entry *page_entry);
+
+void
+insert_page(uint32_t index,struct pagetable_entry *page_entry){
+    KASSERT(page_entry!=NULL);
+
+    //lock page table
+    struct pagetable_entry *tmp = pagetable[index];
+    page_entry->next = tmp;
+    pagetable[index] = page_entry;
+    //unlock page table
 
 }
+
+
+
+struct pagetable_entry * create_page(struct addrspace *as, uint32_t pagenumber, struct region_spec *region);
+
+struct pagetable_entry *
+create_page(struct addrspace *as, uint32_t pagenumber, struct region_spec *region){
+
+    struct pagetable_entry *new = kmalloc(sizeof(struct pagetable_entry));
+    if(new==NULL){
+        return NULL;
+    }
+    new->pid = as;
+    new->entrylo.uint = 0;
+    new->pagenumber = pagenumber;
+    new->next = NULL;
+
+    /* allocate a new frame */
+    vaddr_t kvaddr = alloc_kpages(1);
+    if(kvaddr==0){
+        kfree(new);
+        return NULL;
+    }
+
+    /* set the entrylo */
+    paddr_t paddr = KVADDR_TO_PADDR(kvaddr);
+
+    // frame index in frame table
+    uint32_t frameindex = paddr >> PADDR_TO_FRAME;
+    int dirtybit = 0;
+    if(region->as_perms & PF_W) dirtybit = 1;
+    set_entrylo (&(new->entrylo.lo), VALID_BIT, dirtybit, frameindex);
+
+    return new;
+}
+
+
+
 
 
 
@@ -110,98 +186,64 @@ void vm_bootstrap(void)
 int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
-
-    spinlock_acquire(&pagetable_lock);
-
-    /* No process. This is probably a kernel fault early in boot process*/
-    if (curproc == NULL) {
-            spinlock_release(&pagetable_lock);
-           return EFAULT;
-    }
-
-    struct addrspace *as = proc_getas();
-    /* No address space set up. */
-    if (as == NULL) {
-        spinlock_release(&pagetable_lock);
-        return EFAULT;
-    }
+    uint32_t pagenumber = faultaddress/PAGE_SIZE;
+    vaddr_t faultframe = faultaddress & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
+    uint32_t entryhi, entrylo;
+    entryhi = entrylo = 0;
 
     switch (faulttype) {
     	    case VM_FAULT_READONLY:
-                spinlock_release(&pagetable_lock);
                 return EFAULT;
     	    case VM_FAULT_READ:
     	    case VM_FAULT_WRITE:
     		    break;
     	    default:
-                spinlock_release(&pagetable_lock);
     		      return EINVAL;
     	}
 
-        /* Look up page table Hashed index. */
-        uint32_t pagenumber = faultaddress/PAGE_SIZE;
-
-        uint32_t entryhi, entrylo;
-        entryhi = entrylo = 0;
-
-        /* Look up in page table for VALID translation and load into TLB. */
-        struct pagetable_entry *curr_entry = find_entry(as, faultaddress);
-
-
-
-        if(curr_entry!=NULL){
-            /* Found existing pagetable entry and existing frameentry*/
-            entry_t ehi;
-            set_entryhi(&(ehi.hi),pagenumber);
-            entryhi = ehi.uint;
-            entrylo = curr_entry->entrylo.uint;
-        }else{
-            /* No PageTable Entry Found -> read in a new page */
-            vaddr_t faultframe = faultaddress & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
-            uint32_t index = hpt_hash(as, faultframe);
-            curr_entry = &(pagetable[index]);
-
-            struct region_spec *currregion = as->regions;
-            while(currregion != NULL){
-
-                /* check faultaddr is a valid region */
-                if(faultaddress >= currregion->as_vbase &&
-                     faultaddress < (currregion->as_vbase + (currregion->as_npages*PAGE_SIZE))){
-                         /* insert new page table entry */
-                         curr_entry = insert_entry(as, curr_entry, currregion, pagenumber, &entryhi);
-                         if(curr_entry==NULL){
-                             spinlock_release(&pagetable_lock);
-                             return ENOMEM;
-                         }
-                         entrylo = curr_entry->entrylo.uint;
-                         if(entrylo==0){
-                             panic("entrylo was zero\n");
-                         }
-                    break;
-                }
-                currregion = currregion->as_next;
-            }
-
-            if(currregion==NULL){
-                panic("vm: faultaddress not in any valid region: %d | 0x%x\nfaultframe: %x hpt index: %d\n",faultaddress,faultaddress,faultframe,index);
-                spinlock_release(&pagetable_lock);
-                return EFAULT;
-            }
-
+        /* No process. This is probably a kernel fault early in boot process*/
+        if (curproc == NULL) {
+               return EFAULT;
         }
 
-        if(entryhi==0 || entrylo == 0){
-            panic("Serious error here... entryhi: %d and entrylo: %d\n",entryhi,entrylo);
-            spinlock_release(&pagetable_lock);
+        struct addrspace *as = proc_getas();
+        /* No address space set up. */
+        if (as == NULL) {
             return EFAULT;
         }
+
+        /* Check valid region address. */
+        struct region_spec *region = check_valid_address(as,faultaddress);
+        if(region==NULL){
+            //panic("INVALID REGION\n");
+            return EFAULT;
+        }
+
+        /* Search for existing page entry*/
+        uint32_t index = hpt_hash(as, faultframe);
+        struct pagetable_entry *page_entry = find_page(as, index);
+
+        /* No PageTable Entry Found*/
+        if(page_entry==NULL){
+
+            /* create a new page table entry  */
+            page_entry = create_page(as,pagenumber,region);
+            if(page_entry==NULL){
+                panic("NO NEW ENTRY\n");
+                return ENOMEM;
+            }
+
+            /* insert new page table entry */
+            insert_page(index,page_entry);
+        }
+
+        entryhi = faultframe;
+        entrylo = page_entry->entrylo.uint;
 
         /* Write to the TLB */
         int spl = splhigh();
         tlb_random(entryhi,entrylo);
         splx(spl);
-
-        spinlock_release(&pagetable_lock);
 
         return 0;
 }

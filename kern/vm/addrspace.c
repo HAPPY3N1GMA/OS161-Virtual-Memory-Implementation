@@ -116,8 +116,8 @@ as_copy(struct addrspace *old, struct addrspace **ret)
         /* Look up page table Hashed index. */
         uint32_t pagenumber = faultaddr/PAGE_SIZE;
 
-        struct pagetable_entry *curr_hpt = &(pagetable[old_index]);
-        struct pagetable_entry *new_hpt = &(pagetable[new_index]);
+        struct pagetable_entry *curr_hpt = pagetable[old_index];
+        struct pagetable_entry *new_hpt = pagetable[new_index];
         struct pagetable_entry *new_chain = NULL;
 
         while(curr_hpt!=NULL){
@@ -202,7 +202,7 @@ as_destroy(struct addrspace *as)
     int npages = pagespace / sizeof(struct pagetable_entry);
 
     for (int i = 0; i < npages; i++) {
-        struct pagetable_entry *curr_page = &pagetable[i];
+        struct pagetable_entry *curr_page = pagetable[i];
         struct pagetable_entry *next_page = NULL;
         while(curr_page!=NULL){
                 next_page = curr_page->next;
@@ -347,7 +347,7 @@ as_complete_load(struct addrspace *as)
             /* Look up page frames in this region*/
             vaddr_t frame = curr_region->as_vbase & PAGE_FRAME;
             uint32_t index = hpt_hash(as, frame);
-            struct pagetable_entry *hpt_entry = &(pagetable[index]);
+            struct pagetable_entry *hpt_entry = pagetable[index];
 
             /* Set all entries dirty bit to read only */
             while(hpt_entry!=NULL){

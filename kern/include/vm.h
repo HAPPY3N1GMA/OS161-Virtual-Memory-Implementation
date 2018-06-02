@@ -60,7 +60,7 @@ void free_kpages(vaddr_t addr);
 void vm_tlbshootdown(const struct tlbshootdown *);
 
 extern struct frametable_entry *frametable;
-extern struct pagetable_entry *pagetable;
+extern struct pagetable_entry **pagetable;
 extern struct frametable_entry *firstfreeframe;
 
 

@@ -159,7 +159,7 @@ struct pagetable_entry *
 find_entry_parent(struct addrspace *as, vaddr_t vaddr, struct pagetable_entry **hpt_entry){
     vaddr_t frame = vaddr & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
     uint32_t index = hpt_hash(as, frame);
-    struct pagetable_entry *entry = &(pagetable[index]);
+    struct pagetable_entry *entry = pagetable[index];
     struct pagetable_entry *parent = NULL;
     /* Look up in page table to see if there is a VALID translation. */
     while(entry!=NULL){
