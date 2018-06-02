@@ -68,7 +68,8 @@ as_create(void)
 int
 as_copy(struct addrspace *old, struct addrspace **ret)
 {
-
+    // spinlock_acquire(&pagetable_lock);
+    // spinlock_acquire(&frametable_lock);
     *ret = NULL;
 
     if(old==NULL){

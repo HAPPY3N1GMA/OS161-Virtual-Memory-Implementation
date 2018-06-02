@@ -29,18 +29,17 @@ vaddr_t
 alloc_kpages(unsigned int npages)
 {
         paddr_t paddr;
-
+        spinlock_acquire(&frametable_lock);
         /* VM System not Initialised - Use Bump Allocator */
         if (frametable == 0) {
-            spinlock_acquire(&frametable_lock);
             paddr = ram_stealmem(npages);
-            spinlock_release(&frametable_lock);
         } else {
 
             /* VM System Initialised */
 
             //out of frames return 0
              if(firstfreeframe == 0){
+                 spinlock_release(&frametable_lock);
                  return 0;
              }
 
@@ -49,6 +48,7 @@ alloc_kpages(unsigned int npages)
 
             //only allowed to allocate 1 page at a time
             if (npages != 1) {
+                spinlock_release(&frametable_lock);
               return 0;
             }
 
@@ -57,19 +57,14 @@ alloc_kpages(unsigned int npages)
                 panic("WE ARE ALREADY USED!\n");
             }
 
-          spinlock_acquire(&frametable_lock);
-
           paddr = firstfreeframe - frametable;
           paddr <<= FRAME_TO_PADDR;
           firstfreeframe->used = FRAME_USED;
           firstfreeframe = firstfreeframe->next_free;
-
-          //kprintf("firstfreeframe: 0x%p\n",firstfreeframe);
-
-          spinlock_release(&frametable_lock);
         }
 
         if(paddr == 0){
+            spinlock_release(&frametable_lock);
             kprintf("IT WAS ZERO! index = %d\n(firstfreeframe - frametable) = %d\nsizeof(struct frametable_entry) = %d\n",(int)paddr,(firstfreeframe - frametable),sizeof(struct frametable_entry));
             return 0;
         }
@@ -80,6 +75,7 @@ alloc_kpages(unsigned int npages)
         //zero fill the page
         as_zero_region(paddr, npages);
 
+        spinlock_release(&frametable_lock);
         return PADDR_TO_KVADDR(paddr);
 }
 
@@ -96,6 +92,9 @@ as_zero_region(paddr_t paddr, unsigned npages)
 void
 free_kpages(vaddr_t addr)
 {
+        spinlock_acquire(&frametable_lock);
+        spinlock_acquire(&pagetable_lock);
+
         /* VM System not Initialised */
         if (frametable == 0) {
             // Do nothing -> Leak the memory
@@ -105,6 +104,8 @@ free_kpages(vaddr_t addr)
         /* VM System Initialised */
         paddr_t paddr = KVADDR_TO_PADDR(addr);
         if(paddr == 0){
+            spinlock_release(&pagetable_lock);
+            spinlock_release(&frametable_lock);
             return;
         }
 
@@ -114,7 +115,7 @@ free_kpages(vaddr_t addr)
         struct addrspace *as = proc_getas();
 
         struct pagetable_entry *hpt_entry = NULL;
-        spinlock_acquire(&pagetable_lock);
+
         struct pagetable_entry *prev = find_entry_parent(as, addr, &hpt_entry);
         if(hpt_entry!=NULL){
             /* relink pagetable */
@@ -132,19 +133,19 @@ free_kpages(vaddr_t addr)
                 memset(hpt_entry,0,sizeof(struct pagetable_entry));
             }
         }
-        spinlock_release(&pagetable_lock);
 
-        spinlock_acquire(&frametable_lock);
+
         frametable[index].next_free = firstfreeframe;
         frametable[index].used = FRAME_UNUSED;
         firstfreeframe = &(frametable[index]);
-        spinlock_release(&frametable_lock);
 
         if(firstfreeframe == 0){
             kprintf("ERROR THIS SHOULD NEVER HAPPEN!!!! free mem firstfreeframe was set to zero\n");
         }
-
     }
+
+    spinlock_release(&pagetable_lock);
+    spinlock_release(&frametable_lock);
 }
 
 
