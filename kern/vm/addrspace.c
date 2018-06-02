@@ -65,13 +65,21 @@ as_create(void)
         return as;
 }
 
+
+static int
+as_copy_region(struct addrspace *as, struct region_spec *region){
+        int r = region->as_perms & PF_R;
+        int w = region->as_perms & PF_W;
+        int x = region->as_perms & PF_X;
+        return as_define_region(as, region->as_vbase , region->as_npages * PAGE_SIZE, r, w, x);
+}
+
+
+
 int
 as_copy(struct addrspace *old, struct addrspace **ret)
 {
-    // spinlock_acquire(&pagetable_lock);
-    // spinlock_acquire(&frametable_lock);
     *ret = NULL;
-
     if(old==NULL){
         return 0;
     }
@@ -82,20 +90,22 @@ as_copy(struct addrspace *old, struct addrspace **ret)
             return ENOMEM;
     }
 
+    spinlock_acquire(&pagetable_lock);
+
     struct region_spec *curr_region = old->regions;
 
-    /* copy all regions from old into new */
     while(curr_region!=NULL){
-        int r = curr_region->as_perms & PF_R;
-        int w = curr_region->as_perms & PF_W;
-        int x = curr_region->as_perms & PF_X;
-        int result = as_define_region(new, curr_region->as_vbase , curr_region->as_npages * PAGE_SIZE, r, w, x);
+
+        /* copy the old region into the new address space*/
+        int result = as_copy_region(new,curr_region);
         if(result){
             as_destroy(new);
+            spinlock_release(&pagetable_lock);
             return result;
         }
 
-        //copyin new page frames --> advanced will share page frames instead
+        /* copy page frames */
+
 
         /* Look up page frames in this region*/
         vaddr_t faultaddr = curr_region->as_vbase & PAGE_FRAME;
@@ -103,11 +113,11 @@ as_copy(struct addrspace *old, struct addrspace **ret)
         uint32_t old_index = hpt_hash(old, faultaddr);
         uint32_t new_index = hpt_hash(new, faultaddr);
 
+        /* Look up page table Hashed index. */
+        uint32_t pagenumber = faultaddr/PAGE_SIZE;
+
         struct pagetable_entry *curr_hpt = &(pagetable[old_index]);
-
         struct pagetable_entry *new_hpt = &(pagetable[new_index]);
-
-
         struct pagetable_entry *new_chain = NULL;
 
         while(curr_hpt!=NULL){
@@ -120,7 +130,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
                 }
 
                 /* initialise pagetable entry contents */
-                init_entry(new, new_entry, new->regions, new_index);
+                init_entry(new, new_entry, new->regions, pagenumber);
 
                 /* link into new chain */
                 if(new_chain==NULL){
@@ -140,7 +150,9 @@ as_copy(struct addrspace *old, struct addrspace **ret)
         if(new_chain != NULL){
             if(new_hpt->pid == 0){
                 memcpy(new_hpt,new_chain,sizeof(struct pagetable_entry));
+                spinlock_release(&pagetable_lock);
                 kfree(new_chain);
+                spinlock_acquire(&pagetable_lock);
             }else{
                 //append to end of list
                 struct pagetable_entry *curr = new_hpt;
@@ -155,6 +167,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
         curr_region = curr_region->as_next;
     }
 //panic("AS COPY WAS CALLED\n");
+spinlock_release(&pagetable_lock);
     *ret = new;
     return 0;
 }
@@ -197,6 +210,9 @@ as_destroy(struct addrspace *as)
                 if(curr_page->pid == as){
                     paddr_t framenum = (curr_page->entrylo.lo.framenum)<<FRAME_TO_PADDR;
                     free_kpages(PADDR_TO_KVADDR(framenum));
+                    if(curr_page->pid!=0){
+                        //panic("ERROR\n");
+                    }
                 }
                 curr_page = next_page;
         }
@@ -286,7 +302,6 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
         if(executable) region->as_perms |= PF_X;
 
         region->as_vbase = vaddr;
-        region->as_pbase = KVADDR_TO_PADDR(vaddr);
         region->as_npages = npages;
         region->as_next = as->regions;
         as->regions = region;

@@ -126,23 +126,12 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         return EFAULT;
     }
 
-    struct region_spec *currregion = as->regions;
-
-    	switch (faulttype) {
+    switch (faulttype) {
     	    case VM_FAULT_READONLY:
                 spinlock_release(&pagetable_lock);
                 return EFAULT;
     	    case VM_FAULT_READ:
-                if (~(currregion->as_perms) & PF_R) {
-                    spinlock_release(&pagetable_lock);
-                    return EFAULT;
-                }
-                break;
     	    case VM_FAULT_WRITE:
-                if (~(currregion->as_perms) & PF_W) {
-                    spinlock_release(&pagetable_lock);
-                    return EFAULT;
-                }
     		    break;
     	    default:
                 spinlock_release(&pagetable_lock);
@@ -168,11 +157,11 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             entrylo = curr_entry->entrylo.uint;
         }else{
             /* No PageTable Entry Found -> read in a new page */
-
             vaddr_t faultframe = faultaddress & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
             uint32_t index = hpt_hash(as, faultframe);
             curr_entry = &(pagetable[index]);
 
+            struct region_spec *currregion = as->regions;
             while(currregion != NULL){
 
                 /* check faultaddr is a valid region */
@@ -194,7 +183,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             }
 
             if(currregion==NULL){
-                //panic("vm: faultaddress not in any valid region: %d | 0x%x\nfaultframe: %x hpt index: %d\n",faultaddress,faultaddress,faultframe,index);
+                panic("vm: faultaddress not in any valid region: %d | 0x%x\nfaultframe: %x hpt index: %d\n",faultaddress,faultaddress,faultframe,index);
                 spinlock_release(&pagetable_lock);
                 return EFAULT;
             }
