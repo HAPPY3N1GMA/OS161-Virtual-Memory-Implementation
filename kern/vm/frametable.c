@@ -160,87 +160,56 @@ free_kpages(vaddr_t addr)
     }
 }
 
-
-
-struct pagetable_entry *
-find_entry(struct addrspace *as, vaddr_t vaddr){
-    struct pagetable_entry *hpt_entry = NULL;
-    find_entry_parent(as, vaddr, &hpt_entry);
-    return hpt_entry;
-}
-
-
-
-/* returns parent and target hpt entries */
-struct pagetable_entry *
-find_entry_parent(struct addrspace *as, vaddr_t vaddr, struct pagetable_entry **hpt_entry){
-    vaddr_t frame = vaddr & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
-    uint32_t index = hpt_hash(as, frame);
-    struct pagetable_entry *entry = pagetable[index];
-    struct pagetable_entry *parent = NULL;
-    /* Look up in page table to see if there is a VALID translation. */
-    while(entry!=NULL){
-        if(entry->pid == as && entry->entrylo.lo.valid){
-            break;
-        }
-        parent = entry;
-        entry = entry->next;
-    }
-    *hpt_entry = entry;
-    return parent;
-}
-
-
-
-struct pagetable_entry *
-insert_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber, uint32_t *hi){
-
-    /* externally chaining the new page table entry */
-    if(hpt_entry==NULL){
-        panic("THIS SHOULD NOT BE NULL\n");
-    }
-
-    /* assign a page frame */
-    if(hpt_entry->pid!=NULL){
-
-        /* initialise a chained entry in the pageframe */
-        struct pagetable_entry *new = kmalloc(sizeof(struct pagetable_entry));
-        if(new==NULL){
-            return NULL;
-        }
-        init_entry(as, new, region, pagenumber);
-        new->next = hpt_entry->next;
-        hpt_entry->next = new;
-        hpt_entry = new;
-    }else{
-        /* initialise the first entry in the pageframe */
-        init_entry(as, hpt_entry, region, pagenumber);
-    }
-
-    /* set the entryhi */
-    entry_t ehi;
-    set_entryhi(&(ehi.hi),pagenumber);
-    *hi = ehi.uint;
-
-    return hpt_entry;
-}
-
-
-
-void
-init_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber){
-        //we update the pagetable entry
-        hpt_entry->pid = as;
-        hpt_entry->pagenumber = pagenumber;
-        hpt_entry->next = NULL;
-
-        //allocate a new frame
-        vaddr_t kvaddr = alloc_kpages(1);
-
-        /* set the entrylo */
-        paddr_t paddr = KVADDR_TO_PADDR(kvaddr);
-        uint32_t framenum = paddr >> PADDR_TO_FRAME;//faultaddress - region->as_vbase) + region->as_pbase;
-        int dirtybit = 0;
-        if(region->as_perms & PF_W) dirtybit = 1;
-        set_entrylo (&(hpt_entry->entrylo.lo), VALID_BIT, dirtybit, framenum);
-}
+//
+// struct pagetable_entry *
+// insert_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber, uint32_t *hi){
+//
+//     /* externally chaining the new page table entry */
+//     if(hpt_entry==NULL){
+//         panic("THIS SHOULD NOT BE NULL\n");
+//     }
+//
+//     /* assign a page frame */
+//     if(hpt_entry->pid!=NULL){
+//
+//         /* initialise a chained entry in the pageframe */
+//         struct pagetable_entry *new = kmalloc(sizeof(struct pagetable_entry));
+//         if(new==NULL){
+//             return NULL;
+//         }
+//         init_entry(as, new, region, pagenumber);
+//         new->next = hpt_entry->next;
+//         hpt_entry->next = new;
+//         hpt_entry = new;
+//     }else{
+//         /* initialise the first entry in the pageframe */
+//         init_entry(as, hpt_entry, region, pagenumber);
+//     }
+//
+//     /* set the entryhi */
+//     entry_t ehi;
+//     set_entryhi(&(ehi.hi),pagenumber);
+//     *hi = ehi.uint;
+//
+//     return hpt_entry;
+// }
+//
+//
+//
+// void
+// init_entry(struct addrspace *as, struct pagetable_entry *hpt_entry, struct region_spec *region, uint32_t pagenumber){
+//         //we update the pagetable entry
+//         hpt_entry->pid = as;
+//         hpt_entry->pagenumber = pagenumber;
+//         hpt_entry->next = NULL;
+//
+//         //allocate a new frame
+//         vaddr_t kvaddr = alloc_kpages(1);
+//
+//         /* set the entrylo */
+//         paddr_t paddr = KVADDR_TO_PADDR(kvaddr);
+//         uint32_t framenum = paddr >> PADDR_TO_FRAME;//faultaddress - region->as_vbase) + region->as_pbase;
+//         int dirtybit = 0;
+//         if(region->as_perms & PF_W) dirtybit = 1;
+//         set_entrylo (&(hpt_entry->entrylo.lo), VALID_BIT, dirtybit, framenum);
+// }

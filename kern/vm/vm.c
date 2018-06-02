@@ -33,6 +33,7 @@ void vm_bootstrap(void)
         /* reserve space for pagetable */
         int npages = (nframes * 2);
         pagespace = npages * sizeof(struct pagetable_entry *);
+
         pagetable = kmalloc(pagespace);
         KASSERT(pagetable != NULL);
         for(int i = 0; i<npages; i++) pagetable[i] = NULL;
@@ -44,8 +45,6 @@ void vm_bootstrap(void)
 
 
 struct region_spec *check_valid_address(struct addrspace *as, vaddr_t addr);
-
-
 
 
 struct region_spec *
@@ -81,30 +80,23 @@ return curr_entry;
 }
 
 
-
-
-
-
-void insert_page(uint32_t index,struct pagetable_entry *page_entry);
-
 void
 insert_page(uint32_t index,struct pagetable_entry *page_entry){
     KASSERT(page_entry!=NULL);
 
-    //lock page table
+    spinlock_acquire(&pagetable_lock);
+
     struct pagetable_entry *tmp = pagetable[index];
     page_entry->next = tmp;
     pagetable[index] = page_entry;
-    //unlock page table
 
+    spinlock_release(&pagetable_lock);
 }
 
 
 
-struct pagetable_entry * create_page(struct addrspace *as, uint32_t pagenumber, struct region_spec *region);
-
 struct pagetable_entry *
-create_page(struct addrspace *as, uint32_t pagenumber, struct region_spec *region){
+create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit){
 
     struct pagetable_entry *new = kmalloc(sizeof(struct pagetable_entry));
     if(new==NULL){
@@ -127,8 +119,6 @@ create_page(struct addrspace *as, uint32_t pagenumber, struct region_spec *regio
 
     // frame index in frame table
     uint32_t frameindex = paddr >> PADDR_TO_FRAME;
-    int dirtybit = 0;
-    if(region->as_perms & PF_W) dirtybit = 1;
     set_entrylo (&(new->entrylo.lo), VALID_BIT, dirtybit, frameindex);
 
     return new;
@@ -194,12 +184,16 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         /* No PageTable Entry Found*/
         if(page_entry==NULL){
 
+            int dirtybit = 0;
+            if(region->as_perms & PF_W) dirtybit = 1;
+
             /* create a new page table entry  */
-            page_entry = create_page(as,pagenumber,region);
+            page_entry = create_page(as,pagenumber,dirtybit);
             if(page_entry==NULL){
                 panic("NO NEW ENTRY\n");
                 return ENOMEM;
             }
+            //kprintf("ACCESSED faultaddress %x and index: %d pagenumber:%x\n",faultframe,index,pagenumber<<12);
 
             /* insert new page table entry */
             insert_page(index,page_entry);

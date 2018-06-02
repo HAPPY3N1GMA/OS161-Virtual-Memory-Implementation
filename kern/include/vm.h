@@ -74,6 +74,8 @@ extern struct frametable_entry *firstfreeframe;
 #define FRAME_UNUSED 0
 
 
+#define HPT_VPAGE   0xffff0000
+
 #define PAGE_BITS  12
 #define FRAME_TO_PADDR PAGE_BITS
 #define PADDR_TO_FRAME FRAME_TO_PADDR
@@ -112,6 +114,9 @@ struct pagetable_entry{
 };
 
 extern struct spinlock pagetable_lock;
+
+void insert_page(uint32_t index,struct pagetable_entry *page_entry);
+struct pagetable_entry * create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit);
 
 void          set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum);
 void          set_entryhi (struct EntryHi *entryhi, uint32_t pagenumber);

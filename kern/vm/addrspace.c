@@ -79,99 +79,81 @@ as_copy_region(struct addrspace *as, struct region_spec *region){
 
 
 
+
+int copy_page_table(struct addrspace *old, struct addrspace *new);
+
+
+int
+copy_page_table(struct addrspace *old, struct addrspace *new){
+
+    int npages = pagespace / sizeof(struct pagetable_entry *);
+    //kprintf("COPYPPPPPPPPPPPPPPPP: %d\n",npages);
+    for(int i = 0; i<npages; i++){
+        struct pagetable_entry * curr = pagetable[i];
+
+        while(curr!=NULL){
+            /* copy pages from old address space */
+            if(curr->pid == old){
+                vaddr_t faultframe = (curr->pagenumber)<<FRAME_TO_PADDR;
+                uint32_t index = hpt_hash(new, faultframe);
+
+                //assert frame matches
+                KASSERT(hpt_hash(old, faultframe) == (uint32_t)i);
+
+                /* create a new page table entry  */
+                struct pagetable_entry *page_entry = create_page(new,curr->pagenumber,curr->entrylo.lo.dirty);
+                if(page_entry==NULL){
+                    return ENOMEM;
+                }
+
+                /* insert new page table entry */
+                insert_page(index,page_entry);
+
+                copyframe(curr, page_entry);
+
+            }
+            curr = curr->next;
+        }
+    }
+    return 0;
+}
+
+
 int
 as_copy(struct addrspace *old, struct addrspace **ret)
 {
     *ret = NULL;
+    int result = 0;
+
     if(old==NULL){
         return 0;
     }
 
-    struct addrspace *new;
-    new = as_create();
-    if (new==NULL) {
+    struct addrspace *new_as = as_create();
+    if (new_as==NULL) {
             return ENOMEM;
     }
 
-    spinlock_acquire(&pagetable_lock);
-
+    //do we need a lock on the address space?
     struct region_spec *curr_region = old->regions;
-
     while(curr_region!=NULL){
-
-        /* copy the old region into the new address space*/
-        int result = as_copy_region(new,curr_region);
+        /* copy old regions into the new address space*/
+        result = as_copy_region(new_as,curr_region);
         if(result){
-            as_destroy(new);
-            spinlock_release(&pagetable_lock);
+            as_destroy(new_as);
             return result;
         }
-
-        /* copy page frames */
-
-
-        /* Look up page frames in this region*/
-        vaddr_t faultaddr = curr_region->as_vbase & PAGE_FRAME;
-
-        uint32_t old_index = hpt_hash(old, faultaddr);
-        uint32_t new_index = hpt_hash(new, faultaddr);
-
-        /* Look up page table Hashed index. */
-        uint32_t pagenumber = faultaddr/PAGE_SIZE;
-
-        struct pagetable_entry *curr_hpt = pagetable[old_index];
-        struct pagetable_entry *new_hpt = pagetable[new_index];
-        struct pagetable_entry *new_chain = NULL;
-
-        while(curr_hpt!=NULL){
-            /* copy all relevant frames in this region*/
-            if(old == curr_hpt->pid){
-                struct pagetable_entry *new_entry = kmalloc(sizeof(struct pagetable_entry));
-                if(new_entry==NULL){
-                    //free allready newly chained entries
-                    return ENOMEM;
-                }
-
-                /* initialise pagetable entry contents */
-                init_entry(new, new_entry, new->regions, pagenumber);
-
-                /* link into new chain */
-                if(new_chain==NULL){
-                    new_chain = new_entry;
-                }else{
-                    new_entry->next = new_chain;
-                    new_chain = new_entry;
-                }
-
-                /* copy frame contents */
-                copyframe(curr_hpt, new_entry);
-            }
-            curr_hpt = curr_hpt->next;
-        }
-
-        /* link new chain onto end of existing chain */
-        if(new_chain != NULL){
-            if(new_hpt->pid == 0){
-                memcpy(new_hpt,new_chain,sizeof(struct pagetable_entry));
-                spinlock_release(&pagetable_lock);
-                kfree(new_chain);
-                spinlock_acquire(&pagetable_lock);
-            }else{
-                //append to end of list
-                struct pagetable_entry *curr = new_hpt;
-                while(curr->next!=NULL){
-                    curr = curr->next;
-                }
-                panic("ATTACHING NEW CHAIN\n");
-                curr->next = new_chain;
-            }
-        }
-
         curr_region = curr_region->as_next;
     }
-//panic("AS COPY WAS CALLED\n");
-spinlock_release(&pagetable_lock);
-    *ret = new;
+
+    /* allocate new page table entries*/
+    result = copy_page_table(old, new_as);
+    if(result){
+        as_destroy(new_as);
+        return result;
+    }
+
+    *ret = new_as;
     return 0;
 }
 
@@ -294,7 +276,7 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
         memsize = (memsize + PAGE_SIZE - 1) & PAGE_FRAME; //ceiling memsize to nearest pagesize
 
         npages = memsize / PAGE_SIZE;
-
+        KASSERT(npages > 0);
         struct region_spec *region = kmalloc(sizeof(struct region_spec));
         if(region==NULL){
             return ENOMEM;
@@ -309,6 +291,8 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
         region->as_next = as->regions;
         as->regions = region;
 
+        //kprintf("NEW REGIONS: %x -> %x\n",vaddr,vaddr + (npages*PAGE_SIZE));
+
         return 0;
 }
 
@@ -320,7 +304,7 @@ as_prepare_load(struct addrspace *as)
         //set all regions as read write -> temp until extended assignment
         while(curr_region!=NULL){
             if(!(curr_region->as_perms & PF_W)){
-                //modified flag so that we can revert the wrtie flag after load
+                //modified flag so that we can revert the write flag after load
                 curr_region->as_perms |= (PF_W | OS_M );
             }
             curr_region = curr_region->as_next;
