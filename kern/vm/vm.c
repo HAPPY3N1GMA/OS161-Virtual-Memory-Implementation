@@ -14,12 +14,17 @@
 
 struct frametable_entry *firstfreeframe = 0;
 struct pagetable_entry **pagetable = NULL;
-
 struct spinlock pagetable_lock = SPINLOCK_INITIALIZER;
 
 
 /* Page table functions */
 static struct pagetable_entry *find_page(struct addrspace *as, uint32_t index);
+static void set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum);
+static void copyframe(struct pagetable_entry *from, struct pagetable_entry *to);
+static void insert_page(uint32_t index,struct pagetable_entry *page_entry);
+static struct pagetable_entry * create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit);
+
+
 
 
 /*
@@ -44,8 +49,6 @@ void vm_bootstrap(void)
 }
 
 
-
-
 /*
     find_page
     looks inside chained page table entry for a VALID translation.
@@ -54,7 +57,7 @@ static struct pagetable_entry *
 find_page(struct addrspace *as, uint32_t index){
     struct pagetable_entry *curr_entry = pagetable[index];
     while(curr_entry!=NULL){
-        //check address space matches and valid bit
+        /* check address space matches and valid bit */
         if(curr_entry->pid == as && curr_entry->entrylo.lo.valid){
             break;
         }
@@ -67,18 +70,16 @@ return curr_entry;
 /*
     insert_page
     inserts a new page entry onto the head of the chain at pagetable index
+    must hold pagetable lock before calling
 */
-void
+static void
 insert_page(uint32_t index,struct pagetable_entry *page_entry){
-    KASSERT(page_entry!=NULL);
-
-    spinlock_acquire(&pagetable_lock);
-
+    if(page_entry==NULL){
+        return;
+    }
     struct pagetable_entry *tmp = pagetable[index];
     page_entry->next = tmp;
     pagetable[index] = page_entry;
-
-    spinlock_release(&pagetable_lock);
 }
 
 
@@ -86,7 +87,7 @@ insert_page(uint32_t index,struct pagetable_entry *page_entry){
     create_page
     creates and initialises a new pagetable entry and allocates a frame to back it.
 */
-struct pagetable_entry *
+static struct pagetable_entry *
 create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit){
 
     struct pagetable_entry *new = kmalloc(sizeof(struct pagetable_entry));
@@ -115,6 +116,69 @@ create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit){
     return new;
 }
 
+
+
+
+
+/*
+    copy_page_table
+    given an existing address space, copies all valid page table entries to the new address space,
+    and allocates new frames to back the new pages.
+*/
+int
+copy_page_table(struct addrspace *old, struct addrspace *new){
+
+    int npages = pagespace / sizeof(struct pagetable_entry *);
+
+    spinlock_acquire(&pagetable_lock);
+
+    /* walk the length of the pagetable */
+    for(int i = 0; i<npages; i++){
+        struct pagetable_entry * curr = pagetable[i];
+
+        /* walk the length of the chain */
+        while(curr!=NULL){
+            /* copy valid pages from old address space */
+            if(curr->pid == old && curr->entrylo.lo.valid == 1){
+                vaddr_t page_vbase = (curr->pagenumber)<<FRAME_TO_PADDR;
+                uint32_t index = hpt_hash(new, page_vbase);
+
+                /* create a new page table entry  */
+                struct pagetable_entry *page_entry = create_page(new,curr->pagenumber,curr->entrylo.lo.dirty);
+                if(page_entry==NULL){
+                    spinlock_release(&pagetable_lock);
+                    return ENOMEM;
+                }
+
+                /* insert new page table entry and copy frame contents */
+                insert_page(index,page_entry);
+                copyframe(curr, page_entry);
+            }
+            curr = curr->next;
+        }
+    }
+    spinlock_release(&pagetable_lock);
+    return 0;
+}
+
+
+
+/*
+    copy frame from a to b
+*/
+static void
+copyframe(struct pagetable_entry *from, struct pagetable_entry *to){
+    int from_frame = from->entrylo.lo.framenum;
+    paddr_t from_paddr = from_frame<<FRAME_TO_PADDR;
+
+    int to_frame = to->entrylo.lo.framenum;
+    paddr_t to_paddr = to_frame<<FRAME_TO_PADDR;
+
+    to_paddr = PADDR_TO_KVADDR(to_paddr);
+    from_paddr = PADDR_TO_KVADDR(from_paddr);
+
+    memcpy((void *)to_paddr,(void *)from_paddr,PAGE_SIZE);
+}
 
 
 /*
@@ -161,7 +225,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         if(page_entry==NULL){
 
             /* Check valid region address. */
-            struct region_spec *region = check_valid_address(as,faultaddress);
+            struct region_spec *region = as_check_valid_addr(as,faultaddress);
             if(region==NULL){
                 return EFAULT;
             }
@@ -176,7 +240,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             }
 
             /* insert new page table entry */
+            spinlock_acquire(&pagetable_lock);
             insert_page(index,page_entry);
+            spinlock_release(&pagetable_lock);
         }
 
         entryhi = page_vbase;
@@ -205,7 +271,7 @@ vm_tlbshootdown(const struct tlbshootdown *ts)
     set_entrylo
     initialise an entrylo struct
 */
-void
+static void
 set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum){
     entrylo->unused = 0;
     entrylo->global = 0; //always true for this assignment
@@ -213,16 +279,6 @@ set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum){
     entrylo->dirty = dirty;
     entrylo->nocache = 0; //not used in this assignment
     entrylo->framenum = framenum;
-}
-
-/*
-    set_entryhi
-    initialise an entryhi struct
-*/
-void
-set_entryhi (struct EntryHi *entryhi, uint32_t pagenumber){
-    entryhi->pid = 0; //not used for this assignment
-    entryhi->pagenum = pagenumber;
 }
 
 

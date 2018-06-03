@@ -115,11 +115,7 @@ struct pagetable_entry{
 
 extern struct spinlock pagetable_lock;
 
-void insert_page(uint32_t index,struct pagetable_entry *page_entry);
-struct pagetable_entry * create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit);
-
-void          set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum);
-void          set_entryhi (struct EntryHi *entryhi, uint32_t pagenumber);
+int copy_page_table(struct addrspace *old, struct addrspace *new);
 uint32_t    hpt_hash(struct addrspace *as, vaddr_t faultaddr);
 
 #endif /* _VM_H_ */

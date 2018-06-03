@@ -40,20 +40,17 @@
 #include <elf.h>
 
 
-static void copyframe(struct pagetable_entry *from, struct pagetable_entry *to);
-struct pagetable_entry *destroy_page(struct addrspace *as,struct pagetable_entry *entry);
-
-
-
-
 
 /*
-    check_valid_address
+    as_check_valid_addr
     Checks a given address against an address space regions.
     If valid region found, returns the region.
 */
 struct region_spec *
-check_valid_address(struct addrspace *as, vaddr_t addr){
+as_check_valid_addr(struct addrspace *as, vaddr_t addr){
+    if(as==NULL){
+        return NULL;
+    }
     struct region_spec *currregion = as->regions;
     while(currregion != NULL){
         /* check addr is a valid region */
@@ -68,16 +65,11 @@ check_valid_address(struct addrspace *as, vaddr_t addr){
 
 
 
-/*
- * Note! If OPT_DUMBVM is set, as is the case until you start the VM
- * assignment, this file is not compiled or linked or in any way
- * used. The cheesy hack versions in dumbvm.c are used instead.
- *
- * UNSW: If you use ASST3 config as required, then this file forms
- * part of the VM subsystem.
- *
- */
 
+/*
+    as_create
+    creates new addresspace struct
+*/
 struct addrspace *
 as_create(void)
 {
@@ -91,56 +83,31 @@ as_create(void)
 }
 
 
+/*
+    as_copy_region
+    create a new address space region that is a copy of the given region
+*/
 static int
 as_copy_region(struct addrspace *as, struct region_spec *region){
-        int r = region->as_perms & PF_R;
-        int w = region->as_perms & PF_W;
-        int x = region->as_perms & PF_X;
-        return as_define_region(as, region->as_vbase , region->as_npages * PAGE_SIZE, r, w, x);
-}
-
-
-
-
-int copy_page_table(struct addrspace *old, struct addrspace *new);
-
-
-int
-copy_page_table(struct addrspace *old, struct addrspace *new){
-
-    int npages = pagespace / sizeof(struct pagetable_entry *);
-    //kprintf("COPYPPPPPPPPPPPPPPPP: %d\n",npages);
-    for(int i = 0; i<npages; i++){
-        struct pagetable_entry * curr = pagetable[i];
-
-        while(curr!=NULL){
-            /* copy pages from old address space */
-            if(curr->pid == old){
-                vaddr_t faultframe = (curr->pagenumber)<<FRAME_TO_PADDR;
-                uint32_t index = hpt_hash(new, faultframe);
-
-                //assert frame matches
-                KASSERT(hpt_hash(old, faultframe) == (uint32_t)i);
-
-                /* create a new page table entry  */
-                struct pagetable_entry *page_entry = create_page(new,curr->pagenumber,curr->entrylo.lo.dirty);
-                if(page_entry==NULL){
-                    return ENOMEM;
-                }
-
-                /* insert new page table entry */
-                insert_page(index,page_entry);
-
-                copyframe(curr, page_entry);
-
-            }
-            curr = curr->next;
-        }
+    if(as==NULL){
+        return EFAULT;
     }
-    return 0;
+
+    if(region==NULL){
+        return EFAULT;
+    }
+
+    int r = region->as_perms & PF_R;
+    int w = region->as_perms & PF_W;
+    int x = region->as_perms & PF_X;
+    return as_define_region(as, region->as_vbase , region->as_npages * PAGE_SIZE, r, w, x);
 }
 
 
+/*
+    as_copy
+    deep copy an address space and its pagetable entries
+*/
 int
 as_copy(struct addrspace *old, struct addrspace **ret)
 {
@@ -148,7 +115,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
     int result = 0;
 
     if(old==NULL){
-        return 0;
+        return EFAULT;
     }
 
     struct addrspace *new_as = as_create();
@@ -156,7 +123,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
             return ENOMEM;
     }
 
-    //do we need a lock on the address space?
+    /* No lock required on addrspace as regions are never changed */
     struct region_spec *curr_region = old->regions;
     while(curr_region!=NULL){
         /* copy old regions into the new address space*/
@@ -181,53 +148,59 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 
 
 /*
-    copy frame from a to b
+    as_destroy
+    free an address space and all its pages and frames
 */
-static void
-copyframe(struct pagetable_entry *from, struct pagetable_entry *to){
-    int from_frame = from->entrylo.lo.framenum;
-    paddr_t from_paddr = from_frame<<FRAME_TO_PADDR;
-
-    int to_frame = to->entrylo.lo.framenum;
-    paddr_t to_paddr = to_frame<<FRAME_TO_PADDR;
-
-    to_paddr = PADDR_TO_KVADDR(to_paddr);
-    from_paddr = PADDR_TO_KVADDR(from_paddr);
-
-    memcpy((void *)to_paddr,(void *)from_paddr,PAGE_SIZE);
-}
-
-
-
-
 void
 as_destroy(struct addrspace *as)
 {
+    if(as == NULL){
+        return;
+    }
 
     /* free all pages and frames */
-
     int npages = pagespace / sizeof(struct pagetable_entry);
 
+    spinlock_acquire(&pagetable_lock);
+
+    /*walk pagetable length */
     for (int i = 0; i < npages; i++) {
         struct pagetable_entry *curr_page = pagetable[i];
         struct pagetable_entry *next_page = NULL;
+        struct pagetable_entry *prev_page = NULL;
+        struct pagetable_entry *head = pagetable[i];
+
+        /*walk chain length */
         while(curr_page!=NULL){
                 next_page = curr_page->next;
-                /* free each page and frame */
+
                 if(curr_page->pid == as){
-                    paddr_t framenum = (curr_page->entrylo.lo.framenum)<<FRAME_TO_PADDR;
-                    free_kpages(PADDR_TO_KVADDR(framenum));
-                    if(curr_page->pid!=0){
-                        //panic("ERROR\n");
+
+                    /* free frame */
+                    paddr_t framebase = (curr_page->entrylo.lo.framenum)<<FRAME_TO_PADDR;
+                    free_kpages(PADDR_TO_KVADDR(framebase));
+
+                    /* update head of chain */
+                    if(curr_page==head){
+                         pagetable[i] = next_page;
+                         head = next_page;
+                    }else{
+                        prev_page->next = next_page;
                     }
+                    kfree(curr_page);
+                }else{
+                    prev_page = curr_page;
                 }
                 curr_page = next_page;
         }
     }
 
-    /* free all regions */
+    spinlock_release(&pagetable_lock);
+
+    /* free all regions - no lock required*/
     struct region_spec *curr_region = as->regions;
     struct region_spec *next_region = NULL;
+
     while(curr_region!=NULL){
         next_region = curr_region->as_next;
         kfree(curr_region);
@@ -238,9 +211,13 @@ as_destroy(struct addrspace *as)
 
     /* Flush TLB */
     as_activate();
-
 }
 
+
+/*
+    as_activate
+    from dumbvm -> flush tlb
+*/
 void
 as_activate(void)
 {
@@ -263,6 +240,10 @@ as_activate(void)
 	splx(spl);
 }
 
+/*
+    as_deactivate
+    flush tlb
+*/
 void
 as_deactivate(void)
 {
@@ -270,35 +251,30 @@ as_deactivate(void)
         as_activate();
 }
 
-/*
- * Set up a segment at virtual address VADDR of size MEMSIZE. The
- * segment in memory extends from VADDR up to (but not including)
- * VADDR+MEMSIZE.
- *
- * The READABLE, WRITEABLE, and EXECUTABLE flags are set if read,
- * write, or execute permission should be set on the segment. At the
- * moment, these are ignored. When you write the VM system, you may
- * want to implement them.
+
+ /*
+     as_define_region
+     Set up a segment at virtual address VADDR of size MEMSIZE.
+     The segment in memory extends from VADDR up to (but not including)
+     VADDR+MEMSIZE.
  */
 int
 as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
                  int readable, int writeable, int executable)
 {
-        if(as==NULL){
-            return 0; //fix this error code
-        }
 
-        size_t npages;
+        if(as==NULL){
+            return EFAULT;
+        }
 
         /* Align the region. First, the base... */
         memsize += vaddr & ~(vaddr_t)PAGE_FRAME; //add offset onto memsize
         vaddr &= PAGE_FRAME; //chop the offset off the virtual address
 
         /* ...and now the length. */
-        memsize = (memsize + PAGE_SIZE - 1) & PAGE_FRAME; //ceiling memsize to nearest pagesize
+        memsize = (memsize + PAGE_SIZE - 1) & PAGE_FRAME;
 
-        npages = memsize / PAGE_SIZE;
-        KASSERT(npages > 0);
+        /* initialise region */
         struct region_spec *region = kmalloc(sizeof(struct region_spec));
         if(region==NULL){
             return ENOMEM;
@@ -309,24 +285,29 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
         if(executable) region->as_perms |= PF_X;
 
         region->as_vbase = vaddr;
-        region->as_npages = npages;
+        region->as_npages = memsize / PAGE_SIZE;
         region->as_next = as->regions;
         as->regions = region;
-
-        //kprintf("NEW REGIONS: %x -> %x\n",vaddr,vaddr + (npages*PAGE_SIZE));
 
         return 0;
 }
 
+
+/*
+    as_prepare_load
+    Set all regions as temporarily writeable so OS can load into memory
+*/
 int
 as_prepare_load(struct addrspace *as)
 {
-        struct region_spec *curr_region = as->regions;
+        if(as==NULL){
+            return EFAULT;
+        }
 
-        //set all regions as read write -> temp until extended assignment
+        struct region_spec *curr_region = as->regions;
         while(curr_region!=NULL){
             if(!(curr_region->as_perms & PF_W)){
-                //modified flag so that we can revert the write flag after load
+                /* insert write and modified flag so that we can revert after load */
                 curr_region->as_perms |= (PF_W | OS_M );
             }
             curr_region = curr_region->as_next;
@@ -335,37 +316,57 @@ as_prepare_load(struct addrspace *as)
 }
 
 
+
 /*
-- Re-set the permissions in the addrspace struct to what they were before
-
-- Go through the page table and unset the (D)irty bits on the page table entries for any pages that were loaded into (now) read-only regions
-
-- You also need to remove these pages from the TLB (you can just flush the whole TLB).
+    as_complete_load
+    Reset all the pagetable entries that were modified to be writeable on load,
+    reset regions permissions that were modified and flush the TLB.
 */
 int
 as_complete_load(struct addrspace *as)
 {
-    struct region_spec *curr_region = as->regions;
-    while(curr_region!=NULL){
-        /* remove modified and writeable flags from modified regions */
-        if(curr_region->as_perms & OS_M){
-            curr_region->as_perms &= ~(PF_W | OS_M );
+    int npages = pagespace / sizeof(struct pagetable_entry *);
 
-            // https://piazza.com/class/jdwg14qxhhb4kp?cid=536
+    if(as==NULL){
+        return EFAULT;
+    }
 
-            /* Look up page frames in this region*/
-            vaddr_t frame = curr_region->as_vbase & PAGE_FRAME;
-            uint32_t index = hpt_hash(as, frame);
-            struct pagetable_entry *hpt_entry = pagetable[index];
+    spinlock_acquire(&pagetable_lock);
 
-            /* Set all entries dirty bit to read only */
-            while(hpt_entry!=NULL){
-                hpt_entry->entrylo.lo.dirty = 0;
-                hpt_entry = hpt_entry->next;
+    /* walk the length of the pagetable */
+    for(int i = 0; i<npages; i++){
+        struct pagetable_entry * curr = pagetable[i];
+
+        /* walk the length of the chain */
+        while(curr!=NULL){
+            /* remove tagged pagetable entries writeable flags */
+            if(curr->pid == as && curr->entrylo.lo.valid == 1){
+                //check valid region
+                vaddr_t page_vbase = (curr->pagenumber)<<PAGE_BITS;
+                struct region_spec * region =as_check_valid_addr(as, page_vbase);
+                if(region==NULL){
+                    spinlock_release(&pagetable_lock);
+                    return EFAULT;
+                }
+                /* turn off dirty bit */
+                if(region->as_perms & OS_M){
+                    curr->entrylo.lo.dirty = 0;
+                }
             }
-
+            curr = curr->next;
         }
-        curr_region = curr_region->as_next;
+
+        spinlock_release(&pagetable_lock);
+
+        /* set all modified regions to correct perms - no lock required*/
+        struct region_spec * curr_region = as->regions;
+        while(curr_region!=NULL){
+            if(curr_region->as_perms & OS_M){
+                curr_region->as_perms &= ~(PF_W | OS_M );
+            }
+            curr_region = curr_region->as_next;
+        }
+
     }
 
     /* Flush TLB */
@@ -375,10 +376,21 @@ as_complete_load(struct addrspace *as)
 }
 
 
-
+/*
+    as_define_stack
+    setup a fixed-size stack region and return the stack pointer.
+*/
 int
 as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 {
+    if(as==NULL){
+        return EFAULT;
+    }
+
+    if(stackptr==NULL){
+        return EFAULT;
+    }
+
     vaddr_t stackbase = USERSTACK - STACKSIZE;
 
     int result = as_define_region(as, stackbase, STACKSIZE, VALID_BIT, VALID_BIT, INVALID_BIT);
@@ -391,29 +403,3 @@ as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 
     return 0;
 }
-
-
-
-
-
-
-
-
-
-
- /* You must hold pagetable lock before calling this function */
- struct pagetable_entry *
- destroy_page(struct addrspace *as,struct pagetable_entry *entry){
-     if(entry==NULL){
-         return NULL;
-     }
-
-     if(entry->pid == as){
-         struct pagetable_entry *next = entry->next;
-         kfree(entry);
-         return next;
-     }
-
-     entry->next =destroy_page(as,entry->next);
-     return entry;
- }

@@ -128,7 +128,7 @@ int               as_define_region(struct addrspace *as,
 int               as_prepare_load(struct addrspace *as);
 int               as_complete_load(struct addrspace *as);
 int               as_define_stack(struct addrspace *as, vaddr_t *initstackptr);
-struct region_spec *check_valid_address(struct addrspace *as, vaddr_t addr);
+struct region_spec *as_check_valid_addr(struct addrspace *as, vaddr_t addr);
 
 /*
  * Functions in loadelf.c

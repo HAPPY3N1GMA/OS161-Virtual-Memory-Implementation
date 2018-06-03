@@ -20,20 +20,25 @@ struct spinlock frametable_lock = SPINLOCK_INITIALIZER;
 static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
 
 
-
+/*
+    frametable_bootstrap
+    initialise frametable and reset available memory base.
+    set all OS memory frames as used, and link all free frames
+*/
 void frametable_bootstrap(void){
-
-    //calculate the ram size to get size of frametable
+    unsigned int i;
+    
+    /* calculate the ram size to get size of frametable */
     paddr_t ramtop = ram_getsize();
 
-    //reserve space for frametable
+    /* reserve space for frametable */
     int nframes = (ramtop / PAGE_SIZE);
     framespace = nframes * sizeof(struct frametable_entry);
     struct frametable_entry *ft = kmalloc(framespace);
     KASSERT(ft != NULL);
     memset(ft, 0, framespace);
 
-    unsigned int i;
+
 
     /* reset the base of available memory */
     paddr_t freebase = ram_getfirstfree();
