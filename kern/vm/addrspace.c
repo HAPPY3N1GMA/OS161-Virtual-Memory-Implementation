@@ -159,7 +159,7 @@ as_destroy(struct addrspace *as)
     }
 
     /* free all pages and frames */
-    int npages = pagespace / sizeof(struct pagetable_entry);
+    int npages = pagespace / sizeof(struct pagetable_entry *);
 
     spinlock_acquire(&pagetable_lock);
 

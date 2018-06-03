@@ -287,6 +287,6 @@ uint32_t
 hpt_hash(struct addrspace *as, vaddr_t faultaddr)
 {
         uint32_t pagenumber;
-        pagenumber = (((uint32_t )as) ^ (faultaddr >> PAGE_BITS)) % (pagespace/sizeof(struct pagetable_entry));
+        pagenumber = (((uint32_t )as) ^ (faultaddr >> PAGE_BITS)) % (pagespace/sizeof(struct pagetable_entry *));
         return pagenumber;
 }
