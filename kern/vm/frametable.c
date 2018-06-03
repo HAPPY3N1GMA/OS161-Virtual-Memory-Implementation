@@ -10,6 +10,7 @@
 
 struct frametable_entry{
     char used;
+    int ref;
     struct frametable_entry *next_free;
 };
 
@@ -42,6 +43,7 @@ void frametable_bootstrap(void){
     /* set OS frames as used */
     for(i = 0; i < bumpallocated; i++){
         ft[i].used = FRAME_USED;
+        ft[i].ref = 1;
         ft[i].next_free = 0;
     }
 
@@ -50,11 +52,13 @@ void frametable_bootstrap(void){
     unsigned int freeframes = ((ramtop - freebase)/PAGE_SIZE)-1;
     for (; i <  freeframes;i++) {
         ft[i].used = FRAME_UNUSED;
+        ft[i].ref = 0;
         ft[i].next_free = &(ft[i+1]);
     }
 
     /* set last page to point to 0 */
     ft[i].used = FRAME_UNUSED;
+    ft[i].ref = 0;
     ft[i].next_free = 0;
 
     frametable = ft;
@@ -100,6 +104,7 @@ alloc_kpages(unsigned int npages)
             paddr = firstfreeframe - frametable;
             paddr <<= FRAME_TO_PADDR;
             firstfreeframe->used = FRAME_USED;
+            firstfreeframe->ref += 1; //increment ref counter
             firstfreeframe = firstfreeframe->next_free;
             spinlock_release(&frametable_lock);
         }
@@ -146,9 +151,35 @@ free_kpages(vaddr_t addr)
      	}
 
         spinlock_acquire(&frametable_lock);
-        frametable[frame_index].next_free = firstfreeframe;
-        frametable[frame_index].used = FRAME_UNUSED;
-        firstfreeframe = &(frametable[frame_index]);
+        /* decrement reference counter */
+        frametable[frame_index].ref -= 1;
+        /* ensure last page looking at this frame, then free the frame */
+        if(frametable[frame_index].ref <= 0){
+            frametable[frame_index].next_free = firstfreeframe;
+            frametable[frame_index].used = FRAME_UNUSED;
+            firstfreeframe = &(frametable[frame_index]);
+        }
         spinlock_release(&frametable_lock);
     }
+}
+
+/*
+    frame_ref_cnt
+    return frame reference counter value
+*/
+int
+frame_ref_cnt(int index){
+    return frametable[index].ref;
+}
+
+
+/*
+    frame_ref_mod
+    modify frame reference counter
+*/
+void
+frame_ref_mod(int index, int modifier){
+    spinlock_acquire(&frametable_lock);
+    frametable[index].ref += modifier;
+    spinlock_release(&frametable_lock);
 }
