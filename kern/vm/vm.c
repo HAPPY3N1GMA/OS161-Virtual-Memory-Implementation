@@ -103,7 +103,7 @@ create_shared_page(struct addrspace *as, uint32_t pagenumber, uint32_t sharedfra
     frame_ref_mod(sharedframe, 1);
 
     /* store shared frame that backs the page */
-    set_entrylo (&(new->entrylo.lo), VALID_BIT, INVALID_BIT, sharedframe);
+    set_entrylo(&(new->entrylo.lo), VALID_BIT, INVALID_BIT, sharedframe);
 
     return new;
 }
@@ -138,7 +138,7 @@ create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit){
 
     /* store frame index for frame that backs the page */
     uint32_t frameindex = paddr >> PADDR_TO_FRAME;
-    set_entrylo (&(new->entrylo.lo), VALID_BIT, dirtybit, frameindex);
+    set_entrylo(&(new->entrylo.lo), VALID_BIT, dirtybit, frameindex);
 
     return new;
 }
@@ -147,13 +147,13 @@ create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit){
 
 static int
 readonwrite(struct pagetable_entry *page){
-
     /* check current frame reference count */
     int from_frame = page->entrylo.lo.framenum;
 
     /* if last reference to frame  */
     if(frame_ref_cnt(from_frame)==1){
         /* set page as writeable */
+        KASSERT(page->entrylo.lo.dirty ==0);
         page->entrylo.lo.dirty = 1;
         return 0;
     }
@@ -184,8 +184,8 @@ readonwrite(struct pagetable_entry *page){
 
 /*
     copy_page_table
-    given an existing address space, copies all valid page table entries to the new address space,
-    and allocates new frames to back the new pages.
+    given an existing address space, copies all valid page table entries to
+    the new address space
 */
 int
 copy_page_table(struct addrspace *old, struct addrspace *new){
@@ -202,7 +202,8 @@ copy_page_table(struct addrspace *old, struct addrspace *new){
         while(curr!=NULL){
             /* copy valid pages from old address space */
             if(curr->pid == old && curr->entrylo.lo.valid == 1){
-                vaddr_t page_vbase = (curr->pagenumber)<<FRAME_TO_PADDR;
+                curr->entrylo.lo.dirty = 0;
+                vaddr_t page_vbase = (curr->pagenumber)<< PAGE_BITS;
                 uint32_t index = hpt_hash(new, page_vbase);
 
                 /* create a new page table entry that shares the same frame */
@@ -258,7 +259,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
     switch (faulttype) {
     	    case VM_FAULT_READONLY:
-                return EFAULT;
     	    case VM_FAULT_READ:
     	    case VM_FAULT_WRITE:
     		    break;
@@ -306,11 +306,11 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
         }else{
 
-            /* Is this a read on write */
-            if(faulttype == VM_FAULT_WRITE){
+            /* Is this a write attempt to a readonly page */
+            if(faulttype == VM_FAULT_READONLY){
 
                 /* check page is set read only */
-                if(page_entry->entrylo.lo.dirty == 0){
+                if(page_entry->entrylo.lo.dirty == 0 && page_entry->entrylo.lo.valid == 1){
 
                     /* check valid region address. */
                     struct region_spec *region = as_check_valid_addr(as,faultaddress);
@@ -328,6 +328,17 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                     spinlock_release(&pagetable_lock);
                     if(result){
                         return result;
+                    }
+
+                    /* replace tlb entry if it exists */
+                    entryhi = page_vbase;
+                    entrylo = 0;
+                    int tlb_index = tlb_probe(entryhi, entrylo);
+                    if (tlb_index >= 0) {
+                      entryhi = page_vbase;
+                      entrylo = page_entry->entrylo.uint;
+                      tlb_write(entryhi, entrylo, tlb_index);
+                      return 0;
                     }
 
                 }
@@ -379,6 +390,6 @@ uint32_t
 hpt_hash(struct addrspace *as, vaddr_t faultaddr)
 {
         uint32_t pagenumber;
-        pagenumber = (((uint32_t )as) ^ (faultaddr >> PAGE_BITS)) % (pagespace/sizeof(struct pagetable_entry));
+        pagenumber = (((uint32_t )as) ^ (faultaddr >> PAGE_BITS)) % (pagespace/sizeof(struct pagetable_entry *));
         return pagenumber;
 }
