@@ -323,8 +323,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                         return EFAULT;
                     }
 
-                //    panic("WRITEING ON A READ\n");
-
                     spinlock_acquire(&pagetable_lock);
                     int result = readonwrite(page_entry);
                     spinlock_release(&pagetable_lock);
