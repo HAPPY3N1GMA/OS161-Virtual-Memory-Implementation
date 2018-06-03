@@ -26,7 +26,6 @@ static struct pagetable_entry * create_page(struct addrspace *as, uint32_t pagen
 
 
 
-
 /*
     vm_bootstrap
     initialise Virtual Memory System
@@ -118,8 +117,6 @@ create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit){
 
 
 
-
-
 /*
     copy_page_table
     given an existing address space, copies all valid page table entries to the new address space,
@@ -164,7 +161,7 @@ copy_page_table(struct addrspace *old, struct addrspace *new){
 
 
 /*
-    copy frame from a to b
+    copy a physical memory frames contents, from address a to b
 */
 static void
 copyframe(struct pagetable_entry *from, struct pagetable_entry *to){

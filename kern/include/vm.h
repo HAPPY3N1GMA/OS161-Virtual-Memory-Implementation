@@ -32,8 +32,6 @@
 
 /*
  * VM system-related definitions.
- *
- * You'll probably want to add stuff here.
  */
 
 
@@ -44,6 +42,17 @@
 #define VM_FAULT_READ        0    /* A read was attempted */
 #define VM_FAULT_WRITE       1    /* A write was attempted */
 #define VM_FAULT_READONLY    2    /* A write to a readonly page was attempted*/
+
+/* frame table defines */
+#define INVALID_BIT 0
+#define VALID_BIT 1
+
+#define FRAME_USED VALID_BIT
+#define FRAME_UNUSED 0
+
+#define PAGE_BITS  12
+#define FRAME_TO_PADDR PAGE_BITS
+#define PADDR_TO_FRAME FRAME_TO_PADDR
 
 
 /* Initialization function */
@@ -63,25 +72,7 @@ void vm_tlbshootdown(const struct tlbshootdown *);
 extern struct frametable_entry *frametable;
 extern struct pagetable_entry **pagetable;
 extern struct frametable_entry *firstfreeframe;
-
-
-#define DEBUGMSG 0 //temp used for debug messages
-
-#define INVALID_BIT 0
-#define VALID_BIT 1
-
-#define FRAME_USED VALID_BIT
-#define FRAME_UNUSED 0
-
-
-#define HPT_VPAGE   0xffff0000
-
-#define PAGE_BITS  12
-#define FRAME_TO_PADDR PAGE_BITS
-#define PADDR_TO_FRAME FRAME_TO_PADDR
-
-
-
+extern struct spinlock pagetable_lock;
 
 struct EntryLo{
     unsigned int
@@ -105,6 +96,7 @@ typedef union {
     uint32_t uint;
 } entry_t;
 
+
 /* Hashed Page Table */
 struct pagetable_entry{
     struct addrspace *pid;
@@ -113,8 +105,7 @@ struct pagetable_entry{
     struct pagetable_entry *next;
 };
 
-extern struct spinlock pagetable_lock;
-
+/* VM functions */
 int copy_page_table(struct addrspace *old, struct addrspace *new);
 uint32_t    hpt_hash(struct addrspace *as, vaddr_t faultaddr);
 

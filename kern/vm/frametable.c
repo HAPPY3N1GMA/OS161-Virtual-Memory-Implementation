@@ -13,11 +13,8 @@ struct frametable_entry{
     struct frametable_entry *next_free;
 };
 
-
 struct frametable_entry *frametable = 0;
-
 struct spinlock frametable_lock = SPINLOCK_INITIALIZER;
-static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
 
 
 /*
@@ -27,7 +24,7 @@ static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
 */
 void frametable_bootstrap(void){
     unsigned int i;
-    
+
     /* calculate the ram size to get size of frametable */
     paddr_t ramtop = ram_getsize();
 
@@ -38,13 +35,11 @@ void frametable_bootstrap(void){
     KASSERT(ft != NULL);
     memset(ft, 0, framespace);
 
-
-
     /* reset the base of available memory */
     paddr_t freebase = ram_getfirstfree();
     unsigned int bumpallocated = (freebase / PAGE_SIZE);
 
-    //set OS frames as used
+    /* set OS frames as used */
     for(i = 0; i < bumpallocated; i++){
         ft[i].used = FRAME_USED;
         ft[i].next_free = 0;
@@ -67,13 +62,10 @@ void frametable_bootstrap(void){
 
 
 
- /* Note that this function returns a VIRTUAL address, not a physical
-  * address
-  * WARNING: this function gets called very early, before
-  * vm_bootstrap().  You may wish to modify main.c to call your
-  * frame table initialisation function, or check to see if the
-  * frame table has been initialised and call ram_stealmem() otherwise.
-  */
+/*
+    alloc_kpages
+    allocate next free physical frame and zero out its region.
+*/
 vaddr_t
 alloc_kpages(unsigned int npages)
 {
@@ -82,9 +74,8 @@ alloc_kpages(unsigned int npages)
 
         /* VM System not Initialised - Use Bump Allocator */
         if (frametable == 0) {
-            spinlock_acquire(&stealmem_lock);
     	    paddr = ram_stealmem(npages);
-    	    spinlock_release(&stealmem_lock);
+            spinlock_release(&frametable_lock);
         } else {
 
             /* VM System Initialised */
@@ -93,7 +84,9 @@ alloc_kpages(unsigned int npages)
                  return 0;
              }
 
-             if( firstfreeframe->used == FRAME_USED){
+             /* check frame is available */
+             if(firstfreeframe->used == FRAME_USED){
+                 spinlock_release(&frametable_lock);
                  return 0;
              }
 
@@ -108,16 +101,18 @@ alloc_kpages(unsigned int npages)
             paddr <<= FRAME_TO_PADDR;
             firstfreeframe->used = FRAME_USED;
             firstfreeframe = firstfreeframe->next_free;
+            spinlock_release(&frametable_lock);
         }
 
-        spinlock_release(&frametable_lock);
-
+        /* ensure valid address */
         if(paddr == 0){
             return 0;
         }
 
-        /* make sure it's page-aligned */
-    	KASSERT((paddr & PAGE_FRAME) == paddr);
+        /* ensure it's page-aligned */
+    	if((paddr & PAGE_FRAME) != paddr){
+                return 0;
+        }
 
         /* zero fill the frame */
          bzero((void *)PADDR_TO_KVADDR(paddr), PAGE_SIZE);
@@ -126,11 +121,17 @@ alloc_kpages(unsigned int npages)
 }
 
 
+
+/*
+    free_kpages
+    free frametable entry and make available for allocation
+*/
 void
 free_kpages(vaddr_t addr)
 {
         /* VM System not Initialised */
         if (frametable == 0) {
+            /* bump allocated leak */
             return;
         } else {
         /* VM System Initialised */

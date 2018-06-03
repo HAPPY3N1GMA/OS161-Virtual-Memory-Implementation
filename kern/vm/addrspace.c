@@ -356,8 +356,6 @@ as_complete_load(struct addrspace *as)
             curr = curr->next;
         }
 
-        spinlock_release(&pagetable_lock);
-
         /* set all modified regions to correct perms - no lock required*/
         struct region_spec * curr_region = as->regions;
         while(curr_region!=NULL){
@@ -366,8 +364,9 @@ as_complete_load(struct addrspace *as)
             }
             curr_region = curr_region->as_next;
         }
-
     }
+
+    spinlock_release(&pagetable_lock);
 
     /* Flush TLB */
     as_activate();
