@@ -19,11 +19,13 @@ struct spinlock pagetable_lock = SPINLOCK_INITIALIZER;
 
 
 /* Page table functions */
-
-
 static struct pagetable_entry *find_page(struct addrspace *as, uint32_t index);
 
 
+/*
+    vm_bootstrap
+    initialise Virtual Memory System
+*/
 void vm_bootstrap(void)
 {
         paddr_t ramtop = ram_getsize();
@@ -46,22 +48,26 @@ void vm_bootstrap(void)
 
 /*
     find_page
-    Look up in page table to see if there is a VALID translation.
+    looks inside chained page table entry for a VALID translation.
 */
 static struct pagetable_entry *
 find_page(struct addrspace *as, uint32_t index){
-struct pagetable_entry *curr_entry = pagetable[index];
-while(curr_entry!=NULL){
-    //check address space matches and valid bit
-    if(curr_entry->pid == as && curr_entry->entrylo.lo.valid){
-        break;
+    struct pagetable_entry *curr_entry = pagetable[index];
+    while(curr_entry!=NULL){
+        //check address space matches and valid bit
+        if(curr_entry->pid == as && curr_entry->entrylo.lo.valid){
+            break;
+        }
+        curr_entry = curr_entry->next;
     }
-    curr_entry = curr_entry->next;
-}
 return curr_entry;
 }
 
 
+/*
+    insert_page
+    inserts a new page entry onto the head of the chain at pagetable index
+*/
 void
 insert_page(uint32_t index,struct pagetable_entry *page_entry){
     KASSERT(page_entry!=NULL);
@@ -76,7 +82,10 @@ insert_page(uint32_t index,struct pagetable_entry *page_entry){
 }
 
 
-
+/*
+    create_page
+    creates and initialises a new pagetable entry and allocates a frame to back it.
+*/
 struct pagetable_entry *
 create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit){
 
@@ -99,7 +108,7 @@ create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit){
     /* set the entrylo */
     paddr_t paddr = KVADDR_TO_PADDR(kvaddr);
 
-    // frame index in frame table
+    /* store frame index for frame that backs the page */
     uint32_t frameindex = paddr >> PADDR_TO_FRAME;
     set_entrylo (&(new->entrylo.lo), VALID_BIT, dirtybit, frameindex);
 
@@ -108,26 +117,18 @@ create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit){
 
 
 
-
-
-
-// Called every time the tlb misses (doesn’t find page number)
-// Different fault types we have to deal with;
-// Vm_fault readonly - tried to write to a ro page (return EFAULT)
-// On as_load, need to OR in write bit set to the dirty bit so that it always has write permissions when loading the program
-// Other than that, any write attempt on a read only page is as error
-// Look up page table to see if there is a VALID translation in it,
-// if there is, load it into the TLB
-// If not, look up the region in addrspace structure (for each region, check if it falls within base-bound)
-// If it is a valid region, allocate a frame (zero’d out), then map to it in the HPT (then put it in the tlb with write random)
-// If not valid region, return EFAULT
-
-
+/*
+    vm_fault
+    handles different faults every time the tlb misses.
+    checks that a fault is in a valid region.
+    lookup pagetable for an existing entry and load it into the TLB,
+    else allocate a new page and frame and load it into the TLB.
+*/
 int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
     uint32_t pagenumber = faultaddress/PAGE_SIZE;
-    vaddr_t faultframe = faultaddress & PAGE_FRAME; //zeroing out bottom 12 bits (top 4 is frame number, bottom 12 is frameoffset)
+    vaddr_t page_vbase = faultaddress & PAGE_FRAME;
     uint32_t entryhi, entrylo;
     entryhi = entrylo = 0;
 
@@ -152,19 +153,18 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             return EFAULT;
         }
 
-        /* Check valid region address. */
-        struct region_spec *region = check_valid_address(as,faultaddress);
-        if(region==NULL){
-            //panic("INVALID REGION\n");
-            return EFAULT;
-        }
-
         /* Search for existing page entry*/
-        uint32_t index = hpt_hash(as, faultframe);
+        uint32_t index = hpt_hash(as, page_vbase);
         struct pagetable_entry *page_entry = find_page(as, index);
 
         /* No PageTable Entry Found*/
         if(page_entry==NULL){
+
+            /* Check valid region address. */
+            struct region_spec *region = check_valid_address(as,faultaddress);
+            if(region==NULL){
+                return EFAULT;
+            }
 
             int dirtybit = 0;
             if(region->as_perms & PF_W) dirtybit = 1;
@@ -172,16 +172,14 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             /* create a new page table entry  */
             page_entry = create_page(as,pagenumber,dirtybit);
             if(page_entry==NULL){
-                panic("NO NEW ENTRY\n");
                 return ENOMEM;
             }
-            //kprintf("ACCESSED faultaddress %x and index: %d pagenumber:%x\n",faultframe,index,pagenumber<<12);
 
             /* insert new page table entry */
             insert_page(index,page_entry);
         }
 
-        entryhi = faultframe;
+        entryhi = page_vbase;
         entrylo = page_entry->entrylo.uint;
 
         /* Write to the TLB */
@@ -196,7 +194,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
  *
  * SMP-specific functions.  Unused in our configuration.
  */
-
 void
 vm_tlbshootdown(const struct tlbshootdown *ts)
 {
@@ -204,7 +201,10 @@ vm_tlbshootdown(const struct tlbshootdown *ts)
         panic("vm tried to do tlb shootdown?!\n");
 }
 
-
+/*
+    set_entrylo
+    initialise an entrylo struct
+*/
 void
 set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum){
     entrylo->unused = 0;
@@ -215,6 +215,10 @@ set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum){
     entrylo->framenum = framenum;
 }
 
+/*
+    set_entryhi
+    initialise an entryhi struct
+*/
 void
 set_entryhi (struct EntryHi *entryhi, uint32_t pagenumber){
     entryhi->pid = 0; //not used for this assignment
@@ -222,11 +226,14 @@ set_entryhi (struct EntryHi *entryhi, uint32_t pagenumber){
 }
 
 
+/*
+    hpt_hash
+    pagetable hash function
+*/
 uint32_t
 hpt_hash(struct addrspace *as, vaddr_t faultaddr)
 {
         uint32_t pagenumber;
-
         pagenumber = (((uint32_t )as) ^ (faultaddr >> PAGE_BITS)) % (pagespace/sizeof(struct pagetable_entry));
         return pagenumber;
 }
