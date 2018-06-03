@@ -20,10 +20,11 @@ struct spinlock pagetable_lock = SPINLOCK_INITIALIZER;
 /* Page table functions */
 static struct pagetable_entry *find_page(struct addrspace *as, uint32_t index);
 static void set_entrylo (struct EntryLo *entrylo, int valid, int dirty, uint32_t framenum);
-static void copyframe(struct pagetable_entry *from, struct pagetable_entry *to);
+static void copyframe(int from_frame, int to_frame);
 static void insert_page(uint32_t index,struct pagetable_entry *page_entry);
 static struct pagetable_entry * create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit);
-
+static int readonwrite(struct pagetable_entry *page);
+static struct pagetable_entry *create_shared_page(struct addrspace *as, uint32_t pagenumber, uint32_t sharedframe);
 
 
 /*
@@ -82,6 +83,33 @@ insert_page(uint32_t index,struct pagetable_entry *page_entry){
 }
 
 
+
+/*
+    create_shared_page
+    creates and initialises a new pagetable entry to be read only
+*/
+static struct pagetable_entry *
+create_shared_page(struct addrspace *as, uint32_t pagenumber, uint32_t sharedframe){
+
+    struct pagetable_entry *new = kmalloc(sizeof(struct pagetable_entry));
+    if(new==NULL){
+        return NULL;
+    }
+    new->pid = as;
+    new->entrylo.uint = 0;
+    new->pagenumber = pagenumber;
+    new->next = NULL;
+
+    frame_ref_mod(sharedframe, 1);
+
+    /* store shared frame that backs the page */
+    set_entrylo (&(new->entrylo.lo), VALID_BIT, INVALID_BIT, sharedframe);
+
+    return new;
+}
+
+
+
 /*
     create_page
     creates and initialises a new pagetable entry and allocates a frame to back it.
@@ -117,6 +145,40 @@ create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit){
 
 
 
+static int
+readonwrite(struct pagetable_entry *page){
+
+    /* check current frame reference count */
+    int from_frame = page->entrylo.lo.framenum;
+
+    /* if last reference to frame  */
+    if(frame_ref_cnt(from_frame)==1){
+        /* set page as writeable */
+        page->entrylo.lo.dirty = 1;
+        return 0;
+    }
+
+    /* allocate a new frame */
+    vaddr_t kvaddr = alloc_kpages(1);
+    if(kvaddr==0){
+        return ENOMEM;
+    }
+
+    /* set the entrylo */
+    paddr_t paddr = KVADDR_TO_PADDR(kvaddr);
+
+    /* store frame index for frame that backs the page */
+    uint32_t frameindex = paddr >> PADDR_TO_FRAME;
+    set_entrylo (&(page->entrylo.lo), VALID_BIT, VALID_BIT, frameindex);
+
+    /* copy old frame contents into new frame contents */
+    int to_frame = page->entrylo.lo.framenum;
+    copyframe(from_frame, to_frame);
+
+    return 0;
+}
+
+
 /*
     copy_page_table
     given an existing address space, copies all valid page table entries to the new address space,
@@ -140,16 +202,16 @@ copy_page_table(struct addrspace *old, struct addrspace *new){
                 vaddr_t page_vbase = (curr->pagenumber)<<FRAME_TO_PADDR;
                 uint32_t index = hpt_hash(new, page_vbase);
 
-                /* create a new page table entry  */
-                struct pagetable_entry *page_entry = create_page(new,curr->pagenumber,curr->entrylo.lo.dirty);
+                /* create a new page table entry that shares the same frame */
+                struct pagetable_entry *page_entry = create_shared_page(new, curr->pagenumber, curr->entrylo.lo.framenum);
+
                 if(page_entry==NULL){
                     spinlock_release(&pagetable_lock);
                     return ENOMEM;
                 }
 
-                /* insert new page table entry and copy frame contents */
+                /* insert new page table entry*/
                 insert_page(index,page_entry);
-                copyframe(curr, page_entry);
             }
             curr = curr->next;
         }
@@ -164,11 +226,9 @@ copy_page_table(struct addrspace *old, struct addrspace *new){
     copy a physical memory frames contents, from address a to b
 */
 static void
-copyframe(struct pagetable_entry *from, struct pagetable_entry *to){
-    int from_frame = from->entrylo.lo.framenum;
-    paddr_t from_paddr = from_frame<<FRAME_TO_PADDR;
+copyframe(int from_frame, int to_frame){
 
-    int to_frame = to->entrylo.lo.framenum;
+    paddr_t from_paddr = from_frame<<FRAME_TO_PADDR;
     paddr_t to_paddr = to_frame<<FRAME_TO_PADDR;
 
     to_paddr = PADDR_TO_KVADDR(to_paddr);
@@ -240,6 +300,34 @@ vm_fault(int faulttype, vaddr_t faultaddress)
             spinlock_acquire(&pagetable_lock);
             insert_page(index,page_entry);
             spinlock_release(&pagetable_lock);
+
+        }else{
+
+            /* Is this a read on write */
+            if(faulttype == VM_FAULT_WRITE){
+
+                /* check page is set read only */
+                if(page_entry->entrylo.lo.dirty == 0){
+
+                    /* check valid region address. */
+                    struct region_spec *region = as_check_valid_addr(as,faultaddress);
+                    if(region==NULL){
+                        return EFAULT;
+                    }
+
+                    /* check region has write permisions */
+                    if (!(region->as_perms & PF_W)){
+                        return EFAULT;
+                    }
+                    spinlock_acquire(&pagetable_lock);
+                    int result = readonwrite(page_entry);
+                    spinlock_release(&pagetable_lock);
+                    if(result){
+                        return result;
+                    }
+
+                }
+            }
         }
 
         entryhi = page_vbase;
