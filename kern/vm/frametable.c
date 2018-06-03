@@ -104,7 +104,7 @@ alloc_kpages(unsigned int npages)
             paddr = firstfreeframe - frametable;
             paddr <<= FRAME_TO_PADDR;
             firstfreeframe->used = FRAME_USED;
-            firstfreeframe->ref += 1; //increment ref counter
+            firstfreeframe->ref = 1;
             firstfreeframe = firstfreeframe->next_free;
             spinlock_release(&frametable_lock);
         }

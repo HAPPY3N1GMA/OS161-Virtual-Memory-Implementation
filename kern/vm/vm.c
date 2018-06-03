@@ -175,6 +175,9 @@ readonwrite(struct pagetable_entry *page){
     int to_frame = page->entrylo.lo.framenum;
     copyframe(from_frame, to_frame);
 
+    /* decrement old frame ref count */
+    frame_ref_mod(from_frame, -1);
+
     return 0;
 }
 
@@ -320,7 +323,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                         return EFAULT;
                     }
 
-                    panic("WRITEING ON A READ\n");
+                //    panic("WRITEING ON A READ\n");
 
                     spinlock_acquire(&pagetable_lock);
                     int result = readonwrite(page_entry);
