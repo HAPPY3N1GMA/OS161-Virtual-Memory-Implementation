@@ -179,7 +179,6 @@ as_destroy(struct addrspace *as)
                     /* free frame */
                     paddr_t framebase = (curr_page->entrylo.lo.framenum)<<FRAME_TO_PADDR;
                     free_kpages(PADDR_TO_KVADDR(framebase));
-
                     /* update head of chain */
                     if(curr_page==head){
                          pagetable[i] = next_page;

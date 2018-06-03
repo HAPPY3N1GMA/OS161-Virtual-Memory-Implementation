@@ -24,7 +24,7 @@ static void copyframe(int from_frame, int to_frame);
 static void insert_page(uint32_t index,struct pagetable_entry *page_entry);
 static struct pagetable_entry * create_page(struct addrspace *as, uint32_t pagenumber, int dirtybit);
 static int readonwrite(struct pagetable_entry *page);
-static struct pagetable_entry *create_shared_page(struct addrspace *as, uint32_t pagenumber, uint32_t sharedframe);
+static struct pagetable_entry *create_shared_page(struct addrspace *as, uint32_t pagenumber, uint32_t sharedframe, int valid);
 
 
 /*
@@ -89,7 +89,7 @@ insert_page(uint32_t index,struct pagetable_entry *page_entry){
     creates and initialises a new pagetable entry to be read only
 */
 static struct pagetable_entry *
-create_shared_page(struct addrspace *as, uint32_t pagenumber, uint32_t sharedframe){
+create_shared_page(struct addrspace *as, uint32_t pagenumber, uint32_t sharedframe, int valid){
 
     struct pagetable_entry *new = kmalloc(sizeof(struct pagetable_entry));
     if(new==NULL){
@@ -100,10 +100,11 @@ create_shared_page(struct addrspace *as, uint32_t pagenumber, uint32_t sharedfra
     new->pagenumber = pagenumber;
     new->next = NULL;
 
+    /* incremembe the frame reference count */
     frame_ref_mod(sharedframe, 1);
 
     /* store shared frame that backs the page */
-    set_entrylo (&(new->entrylo.lo), VALID_BIT, INVALID_BIT, sharedframe);
+    set_entrylo (&(new->entrylo.lo), valid, INVALID_BIT, sharedframe);
 
     return new;
 }
@@ -164,6 +165,9 @@ readonwrite(struct pagetable_entry *page){
         return ENOMEM;
     }
 
+    /* decrement old frame ref count */
+    frame_ref_mod(from_frame, -1);
+
     /* set the entrylo */
     paddr_t paddr = KVADDR_TO_PADDR(kvaddr);
 
@@ -175,9 +179,6 @@ readonwrite(struct pagetable_entry *page){
     int to_frame = page->entrylo.lo.framenum;
     copyframe(from_frame, to_frame);
 
-    /* decrement old frame ref count */
-    frame_ref_mod(from_frame, -1);
-
     return 0;
 }
 
@@ -185,7 +186,7 @@ readonwrite(struct pagetable_entry *page){
 /*
     copy_page_table
     given an existing address space, copies all valid page table entries to the new address space,
-    and allocates new frames to back the new pages.
+    sets both pages to share the existing frame, and sets both pages to read only.
 */
 int
 copy_page_table(struct addrspace *old, struct addrspace *new){
@@ -201,12 +202,15 @@ copy_page_table(struct addrspace *old, struct addrspace *new){
         /* walk the length of the chain */
         while(curr!=NULL){
             /* copy valid pages from old address space */
-            if(curr->pid == old && curr->entrylo.lo.valid == 1){
-                vaddr_t page_vbase = (curr->pagenumber)<<FRAME_TO_PADDR;
+            if(curr->pid == old){
+                vaddr_t page_vbase = (curr->pagenumber) << FRAME_TO_PADDR;
                 uint32_t index = hpt_hash(new, page_vbase);
 
+                /* make pageentry read only */
+                curr->entrylo.lo.dirty = 0;
+
                 /* create a new page table entry that shares the same frame */
-                struct pagetable_entry *page_entry = create_shared_page(new, curr->pagenumber, curr->entrylo.lo.framenum);
+                struct pagetable_entry *page_entry = create_shared_page(new, curr->pagenumber, curr->entrylo.lo.framenum,curr->entrylo.lo.valid);
 
                 if(page_entry==NULL){
                     spinlock_release(&pagetable_lock);
@@ -329,7 +333,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
                     if(result){
                         return result;
                     }
-
                 }
             }
         }
