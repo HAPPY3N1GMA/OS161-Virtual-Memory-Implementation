@@ -1,8 +1,8 @@
-ASST3 - VIRTUAL MEMORY - DESIGN DOCUMENT
+# OS-161 VIRTUAL MEMORY #
 
 ## Physical Memory Management: ##
 
-# Frame table implementation #
+### Frame table implementation #
 In a paging virtual memory (vm) system, you readily need to know how
 many frames of physical memory you have and which of these are free
 or currently being used. To calculate the number of frames overall,
@@ -29,8 +29,7 @@ pointer until everything was set up, at which point we set the global
 frame table pointer equal to the local one.
 
 
-
-## Allocating frames ##
+### Allocating frames ##
 
 As alloc_kpages() can be called before the vm system is configured,
 it needs to be able to allocate memory independant of the vm system,
@@ -54,7 +53,7 @@ release it whenever returning.
 
 
 
-## Deallocating frames ##
+### Deallocating frames ##
 
 Whilst the vm system is not set up you cannot free memory (have no
 metadata about allocated memory i.e. where the alloted block starts,
@@ -69,10 +68,9 @@ list.
 Concurrency issues are dealt with via a simple frame table lock.
 
 
-
 ## Address Space Management: ##
 
-# Defining regions #
+### Defining regions #
 
 As memory is allocated in frames, when defining a new region we had
 to essentially floor the regions base address to a frame base address
@@ -92,7 +90,7 @@ checking requires the base address to be the lowest address in the
 region.
 
 
-# Copying regions to a new address space #
+### Copying regions to a new address space #
 
 First we create a new address space, this is important as it is
 required to generate the correct hash for the page table index.
@@ -114,7 +112,7 @@ PADDR_TO_KVADDR macro to be able to call memcpy.
 
 
 
-# Loading regions #
+### Loading regions #
 
 In prepare load, we simply loop through all regions of an address
 space and if the write bit is not set, we set it. We also turn on a
@@ -130,10 +128,9 @@ for each of the regions that also have the OS_M flag in a simple
 loop.
 
 
-
 ## Address Translation: ##
 
-# Page table implementation #
+### Page table implementation #
 
 Hashed page tables generally have a power of 2 order of magnitude
 number of entries as there are frames. We initialised our page table
@@ -150,7 +147,7 @@ that can be accessed at named bit offsets.
 
 
 
-## TLB miss handling ##
+### TLB miss handling ##
 (creating page table entries, backing them with frames,
 and storing an active set in the TLB)
 
